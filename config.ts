@@ -54,6 +54,10 @@ export const config = {
       "vasuchouthri811@gmail.com"
     ]
   },
+  sendgrid: {
+    apiKey: process.env.SENDGRID_API_KEY || "",
+    fromEmail: process.env.FROM_EMAIL || "info@flowerschoolbengaluru.com"
+  },
   session: {
     secret: process.env.SESSION_SECRET || "dev_secret_change_in_production"
   },

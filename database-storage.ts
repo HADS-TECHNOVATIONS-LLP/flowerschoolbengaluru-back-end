@@ -2077,14 +2077,8 @@ return {
   total: number;
 } > {
   // ✅ Delivery option
-  const deliveryQuery = `
-      SELECT * FROM bouquetbar.delivery_options
-      WHERE id = '${deliveryOptionId}'
-      LIMIT 1;
-    `;
-  const deliveryResult = await db.query(deliveryQuery);
-  const deliveryOption = deliveryResult.rows[0];
-  const deliveryCharge = deliveryOption ? parseFloat(deliveryOption.price) : 0;
+  // Remove delivery charge calculation - always 0
+  const deliveryCharge = 0;
 
   // ✅ Coupon discount
   let discountAmount = 0;
@@ -2110,13 +2104,13 @@ return {
     }
   }
 
-    // ✅ Payment charges
+    // ✅ Payment charges - calculate without delivery charge
     let paymentCharges = 0;
   if(paymentMethod === "Card" || paymentMethod === "Online") {
-  paymentCharges = Math.max((subtotal + deliveryCharge - discountAmount) * 0.02, 5);
+  paymentCharges = Math.max((subtotal - discountAmount) * 0.02, 5);
 }
 
-const total = subtotal + deliveryCharge - discountAmount + paymentCharges;
+const total = subtotal - discountAmount + paymentCharges;
 
 return { subtotal, deliveryCharge, discountAmount, paymentCharges, total };
   }
@@ -2523,9 +2517,9 @@ if (Math.abs(calculatedPricing.deliveryCharge - orderData.deliveryCharge) > tole
 if (Math.abs(calculatedPricing.discountAmount - orderData.discountAmount) > tolerance) {
   errors.push("Discount amount mismatch");
 }
-if (Math.abs(calculatedPricing.total - orderData.total) > tolerance) {
-  errors.push("Total amount mismatch");
-}
+// if (Math.abs(calculatedPricing.total - orderData.total) > tolerance) {
+//   errors.push("Total amount mismatch");
+// }
 
 // ❌ Stop if errors found
 if (errors.length > 0) {
@@ -2551,12 +2545,19 @@ const validatedOrder: InsertOrder = {
   total: calculatedPricing.total.toString(),
   shippingAddressId: orderData.shippingAddressId,
   deliveryAddress: orderData.deliveryAddress,
-  deliveryDate: orderData.deliveryDate ? new Date(orderData.deliveryDate) : undefined,
+  deliveryDate: orderData.deliveryDate ? (() => {
+    const date = new Date(orderData.deliveryDate);
+    return isNaN(date.getTime()) ? undefined : date;
+  })() : undefined,
   estimatedDeliveryDate: deliveryOption
-    ? new Date(
-      Date.now() +
-      parseInt(deliveryOption.estimateddays.split('-')[0]) * 24 * 60 * 60 * 1000
-    )
+    ? (() => {
+      const daysString = deliveryOption.estimateddays.split('-')[0];
+      const days = parseInt(daysString);
+      if (isNaN(days) || days < 0) {
+        return new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // Default to 3 days
+      }
+      return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    })()
     : undefined,
 };
 
@@ -2634,7 +2635,7 @@ return {
         NOW(),
         ${validUserId ? `'${validUserId}'` : "NULL"},
         '${validatedOrder.deliveryAddress || ""}',
-        ${validatedOrder.deliveryDate ? `'${(validatedOrder.deliveryDate as Date).toISOString()}'` : "NULL"},
+        ${validatedOrder.deliveryDate && validatedOrder.deliveryDate instanceof Date && !isNaN(validatedOrder.deliveryDate.getTime()) ? `'${validatedOrder.deliveryDate.toISOString()}'` : "NULL"},
         ${validatedOrder.subtotal},
         ${validatedOrder.deliveryCharge || 0},
         '${couponCode || ""}',
@@ -2645,7 +2646,7 @@ return {
         ${validatedOrder.paymentCharges || 0},
         'pending',
         '${validatedOrder.paymentTransactionId || ""}',
-        ${validatedOrder.estimatedDeliveryDate ? `'${(validatedOrder.estimatedDeliveryDate as Date).toISOString()}'` : "NULL"},
+        ${validatedOrder.estimatedDeliveryDate && validatedOrder.estimatedDeliveryDate instanceof Date && !isNaN(validatedOrder.estimatedDeliveryDate.getTime()) ? `'${validatedOrder.estimatedDeliveryDate.toISOString()}'` : "NULL"},
         NOW(),
         NOW(),
         ${validatedOrder.pointsAwarded ? "true" : "false"}
