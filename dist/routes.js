@@ -7,13 +7,17 @@ import { insertOrderSchema, insertEnrollmentSchema, insertUserSchema, updateUser
 import { z } from "zod";
 import twilio from "twilio";
 import { notificationService } from "./services/notification-service.js";
+import { emailService } from "./services/email-service.js";
 import Razorpay from "razorpay";
 import crypto from "crypto";
+import sgMail from '@sendgrid/mail';
+import { config } from './config.js';
 // Simple in-memory session storage
 const sessions = new Map();
 // Simple in-memory OTP storage
 const otpStorage = new Map();
-import { config } from './config.js';
+// Initialize SendGrid
+sgMail.setApiKey(config.sendgrid.apiKey);
 // Initialize Razorpay client
 const razorpay = new Razorpay({
     key_id: config.razorpay.keyId,
@@ -760,89 +764,113 @@ export async function registerRoutes(app) {
             res.status(500).json({ error: 'Failed to fetch custom requests' });
         }
     });
-    // Pay Later routes
+    // Pay Later routes - Course details email only (no payment required)
     app.post("/api/paylater", async (req, res) => {
         try {
-            const { full_name, email_address, phone_number, payment_method, questions_or_comments, courses_or_workshops } = req.body;
+            const { full_name, email_address, phone_number, courses_or_workshops, questions_or_comments } = req.body;
             // Validate required fields
-            if (!full_name || !email_address || !phone_number || !payment_method) {
+            if (!full_name || !email_address || !phone_number || !courses_or_workshops) {
                 return res.status(400).json({
-                    error: 'Missing required fields: full_name, email_address, phone_number, payment_method'
+                    error: 'Missing required fields: full_name, email_address, phone_number, courses_or_workshops'
                 });
             }
+            // Store pay later request in database
             const payLaterData = {
                 full_name,
                 email_address,
                 phone_number,
-                payment_method,
-                questions_or_comments,
+                payment_method: 'Pay Later',
+                questions_or_comments: questions_or_comments || '',
                 courses_or_workshops
             };
             const result = await storage.createPayLaterRequest(payLaterData);
-            res.status(201).json(result);
-            // Send WhatsApp confirmation message asynchronously for Pay Later requests
-            setImmediate(async () => {
-                try {
-                    console.log('[PAY LATER WHATSAPP] Sending confirmation for:', {
-                        name: full_name,
-                        phone: phone_number.slice(0, 3) + '****' + phone_number.slice(-4),
-                        course: courses_or_workshops,
-                        paymentMethod: payment_method
-                    });
-                    const whatsappMessage = `🎓 Enrollment Request Received!\n\nHi ${full_name},\n\nThank you for your interest in ${courses_or_workshops}!\n\n📋 Request ID: ${result.id}\n💳 Payment Method: ${payment_method}\n\nOur team will contact you shortly with payment details and next steps.\n\nFor any questions: ${questions_or_comments || 'None provided'}\n\nThank you for choosing Bouquet Bar! 🌸`;
-                    // Use the same Twilio client configuration
-                    const twilioWhatsApp = twilio("AC33481cb2b9a8c5cd0e7ebfa5e7ef41be", "b6d4fa8e66be7495c3016c7089cb04f4");
-                    // Format phone number
-                    let formattedPhone = phone_number.trim();
-                    if (!formattedPhone.startsWith('+')) {
-                        formattedPhone = '+' + formattedPhone.replace(/^91/, '');
-                    }
-                    if (!formattedPhone.startsWith('+91')) {
-                        formattedPhone = '+91' + formattedPhone.replace(/^\+/, '');
-                    }
-                    // Send WhatsApp message
-                    const whatsappResult = await twilioWhatsApp.messages.create({
-                        body: whatsappMessage,
-                        from: "whatsapp:+15558910172",
-                        to: `whatsapp:${formattedPhone}`
-                    });
-                    console.log('[PAY LATER WHATSAPP] Confirmation sent successfully:', {
-                        sid: whatsappResult.sid,
-                        phone: formattedPhone.slice(0, 3) + '****' + formattedPhone.slice(-4),
-                        requestId: result.id,
-                        course: courses_or_workshops
-                    });
-                    // Also send admin notification
-                    const adminWhatsappMessage = `🎓 New Pay Later Request!\n\nStudent: ${full_name}\nPhone: ${phone_number}\nEmail: ${email_address}\nCourse: ${courses_or_workshops}\nPayment Method: ${payment_method}\nQuestions: ${questions_or_comments || 'None'}\n\nRequest ID: ${result.id}\nPlease follow up with the student.`;
-                    try {
-                        const adminResult = await twilioWhatsApp.messages.create({
-                            body: adminWhatsappMessage,
-                            from: "whatsapp:+15558910172",
-                            to: "whatsapp:+919042358932" // Admin number
-                        });
-                        console.log('[PAY LATER WHATSAPP] Admin notification sent:', {
-                            sid: adminResult.sid,
-                            requestId: result.id
-                        });
-                    }
-                    catch (adminError) {
-                        console.error('[PAY LATER WHATSAPP] Admin notification failed:', adminError);
-                    }
-                }
-                catch (whatsappError) {
-                    console.error('[PAY LATER WHATSAPP] Failed to send confirmation:', whatsappError);
-                    // Don't fail the request if WhatsApp fails
-                }
-            });
+            console.log('Pay later request created:', result.id);
+            // Send course details email (no payment required)
+            try {
+                const courseDetailsEmail = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Course Details - Flower School Bengaluru</title>
+          </head>
+          <body style="margin: 0; padding: 0; background-color: #f7f7f7; font-family: Arial, sans-serif;">
+            <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 40px 20px;">
+              <div style="text-align: center; margin-bottom: 30px;">
+                <h1 style="color: #2d3748; margin: 0; font-size: 28px;">Flower School Bengaluru</h1>
+                <p style="color: #666; margin: 5px 0 0 0;">Course Details & Information</p>
+              </div>
+              
+              <div style="background-color: #e6fffa; border-left: 4px solid #38b2ac; padding: 20px; margin-bottom: 30px;">
+                <h2 style="color: #2d3748; margin: 0 0 10px 0; font-size: 24px;">📚 Course Information Shared</h2>
+                <p style="color: #2d3748; margin: 0; font-size: 16px;">
+                  Thank you for your interest! Here are the course details you requested.
+                </p>
+              </div>
+
+              <div style="margin-bottom: 30px;">
+                <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">👤 Student Information</h3>
+                <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
+                  <p style="margin: 0 0 10px 0;"><strong>Name:</strong> ${payLaterData.full_name}</p>
+                  <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${payLaterData.email_address}</p>
+                  <p style="margin: 0 0 10px 0;"><strong>Phone:</strong> ${payLaterData.phone_number}</p>
+                  <p style="margin: 0 0 10px 0;"><strong>Course Interest:</strong> ${payLaterData.courses_or_workshops}</p>
+                  ${payLaterData.questions_or_comments ? `<p style="margin: 0;"><strong>Questions:</strong> ${payLaterData.questions_or_comments}</p>` : ''}
+                </div>
+              </div>
+
+              <div style="margin-bottom: 30px;">
+                <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">🌸 What's Next?</h3>
+                <ul style="color: #4a5568; line-height: 1.6;">
+                  <li>Our team will contact you within 24-48 hours</li>
+                  <li>We'll share detailed course curriculum and schedule</li>
+                  <li>Payment can be made later as per your convenience</li>
+                  <li>All course materials will be provided upon enrollment</li>
+                  <li>Certificate will be issued upon successful completion</li>
+                </ul>
+              </div>
+
+              <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e2e8f0;">
+                <p style="color: #666; margin: 0 0 10px 0; font-size: 14px;">
+                  Need immediate help? Contact us:
+                </p>
+                <p style="color: #2d3748; margin: 0; font-weight: 600;">
+                  📧 info@flowerschoolbengaluru.com | 📞 +91 99728 03847
+                </p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
+                const msg = {
+                    to: payLaterData.email_address,
+                    from: {
+                        email: 'info@flowerschoolbengaluru.com',
+                        name: 'Flower School Bengaluru'
+                    },
+                    subject: '📚 Course Details - Flower School Bengaluru',
+                    html: courseDetailsEmail
+                };
+                await sgMail.send(msg);
+                console.log('Course details email sent to:', payLaterData.email_address);
+            }
+            catch (emailError) {
+                console.error('Error sending course details email:', emailError);
+                // Don't fail the request if email fails
+            }
             res.status(201).json({
                 success: true,
-                message: 'Pay later request created successfully',
-                payLater: result
+                message: 'Course details shared successfully',
+                data: result
             });
         }
         catch (error) {
-            console.error('Error creating pay later request:', error);
-            res.status(500).json({ error: 'Failed to create pay later request' });
+            console.error('Error processing pay later request:', error);
+            res.status(500).json({
+                error: 'Failed to process request',
+                message: error instanceof Error ? error.message : 'Unknown error'
+            });
         }
     });
     app.get("/api/paylater", async (req, res) => {
@@ -881,42 +909,6 @@ export async function registerRoutes(app) {
         }
     });
     // Razorpay Payment Integration Routes
-    app.post("/api/payment/create-order", async (req, res) => {
-        try {
-            const { amount, currency = 'INR', receipt, notes } = req.body;
-            // Validate required fields
-            if (!amount || amount <= 0) {
-                return res.status(400).json({
-                    error: 'Invalid amount. Amount must be greater than 0'
-                });
-            }
-            // Create Razorpay order
-            const razorpayOrder = await razorpay.orders.create({
-                amount: Math.round(amount * 100), // Convert to paise (smallest currency unit)
-                currency,
-                receipt: receipt || `receipt_${Date.now()}`,
-                notes: notes || {}
-            });
-            console.log('Razorpay order created:', razorpayOrder.id);
-            res.status(201).json({
-                success: true,
-                order: {
-                    id: razorpayOrder.id,
-                    amount: razorpayOrder.amount,
-                    currency: razorpayOrder.currency,
-                    receipt: razorpayOrder.receipt
-                },
-                key: config.razorpay.keyId
-            });
-        }
-        catch (error) {
-            console.error('Error creating Razorpay order:', error);
-            res.status(500).json({
-                error: 'Failed to create payment order',
-                message: error instanceof Error ? error.message : 'Unknown error'
-            });
-        }
-    });
     app.post("/api/payment/verify", async (req, res) => {
         try {
             const { razorpay_order_id, razorpay_payment_id, razorpay_signature, enrollment_data } = req.body;
@@ -955,35 +947,89 @@ export async function registerRoutes(app) {
                     };
                     const payLaterResult = await storage.createPayLaterRequest(payLaterData);
                     console.log('Pay later record created after payment:', payLaterResult.id);
-                    // Send WhatsApp confirmation message asynchronously
+                    // Send course enrollment completion email after successful payment
                     setImmediate(async () => {
                         try {
-                            const whatsappMessage = `🎉 Payment Successful!\n\nHi ${enrollment_data.full_name},\n\nYour payment for ${enrollment_data.courses_or_workshops} has been confirmed!\n\n💳 Payment ID: ${razorpay_payment_id}\n📋 Order ID: ${razorpay_order_id}\n\nOur team will contact you shortly with next steps.\n\nThank you for choosing Bouquet Bar! 🌸`;
-                            // Use the same Twilio client configuration
-                            const twilioWhatsApp = twilio("AC33481cb2b9a8c5cd0e7ebfa5e7ef41be", "b6d4fa8e66be7495c3016c7089cb04f4");
-                            // Format phone number
-                            let formattedPhone = enrollment_data.phone_number.trim();
-                            if (!formattedPhone.startsWith('+')) {
-                                formattedPhone = '+' + formattedPhone.replace(/^91/, '');
-                            }
-                            if (!formattedPhone.startsWith('+91')) {
-                                formattedPhone = '+91' + formattedPhone.replace(/^\+/, '');
-                            }
-                            // Send WhatsApp message
-                            const whatsappResult = await twilioWhatsApp.messages.create({
-                                body: whatsappMessage,
-                                from: "whatsapp:+15558910172",
-                                to: `whatsapp:${formattedPhone}`
-                            });
-                            console.log('[PAYMENT WHATSAPP] Confirmation sent successfully:', {
-                                sid: whatsappResult.sid,
-                                phone: formattedPhone.slice(0, 3) + '****' + formattedPhone.slice(-4),
-                                orderId: razorpay_order_id
-                            });
+                            const enrollmentCompletionEmail = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Course Enrollment Completed - Flower School Bengaluru</title>
+                </head>
+                <body style="margin: 0; padding: 0; background-color: #f7f7f7; font-family: Arial, sans-serif;">
+                  <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 40px 20px;">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                      <h1 style="color: #2d3748; margin: 0; font-size: 28px;">Flower School Bengaluru</h1>
+                      <p style="color: #666; margin: 5px 0 0 0;">Course Enrollment Completed</p>
+                    </div>
+                    
+                    <div style="background-color: #d4eed6; border-left: 4px solid #48bb78; padding: 20px; margin-bottom: 30px;">
+                      <h2 style="color: #2d3748; margin: 0 0 10px 0; font-size: 24px;">🎉 Enrollment Completed Successfully!</h2>
+                      <p style="color: #2d3748; margin: 0; font-size: 16px;">
+                        Congratulations! Your payment has been confirmed and course enrollment is complete.
+                      </p>
+                    </div>
+
+                    <div style="margin-bottom: 30px;">
+                      <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">💳 Payment Details</h3>
+                      <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
+                        <p style="margin: 0 0 10px 0;"><strong>Payment ID:</strong> ${razorpay_payment_id}</p>
+                        <p style="margin: 0 0 10px 0;"><strong>Order ID:</strong> ${razorpay_order_id}</p>
+                        <p style="margin: 0;"><strong>Status:</strong> <span style="color: #48bb78; font-weight: bold;">PAID</span></p>
+                      </div>
+                    </div>
+
+                    <div style="margin-bottom: 30px;">
+                      <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">📚 Course Details</h3>
+                      <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
+                        <p style="margin: 0 0 10px 0;"><strong>Student Name:</strong> ${enrollment_data.full_name}</p>
+                        <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${enrollment_data.email_address}</p>
+                        <p style="margin: 0 0 10px 0;"><strong>Phone:</strong> ${enrollment_data.phone_number}</p>
+                        <p style="margin: 0 0 10px 0;"><strong>Course/Workshop:</strong> ${enrollment_data.courses_or_workshops}</p>
+                        ${enrollment_data.questions_or_comments ? `<p style="margin: 0;"><strong>Special Requests:</strong> ${enrollment_data.questions_or_comments}</p>` : ''}
+                      </div>
+                    </div>
+
+                    <div style="margin-bottom: 30px;">
+                      <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">🌟 What's Next?</h3>
+                      <ul style="color: #4a5568; line-height: 1.6;">
+                        <li>Our team will contact you within 24 hours with course schedule details</li>
+                        <li>You'll receive course materials and joining instructions</li>
+                        <li>Certificate will be provided upon successful completion</li>
+                        <li>Access to our exclusive student community</li>
+                        <li>Ongoing support throughout your learning journey</li>
+                      </ul>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e2e8f0;">
+                      <p style="color: #666; margin: 0 0 10px 0; font-size: 14px;">
+                        Welcome to Flower School Bengaluru! Questions?
+                      </p>
+                      <p style="color: #2d3748; margin: 0; font-weight: 600;">
+                        📧 info@flowerschoolbengaluru.com | 📞 +91 99728 03847
+                      </p>
+                    </div>
+                  </div>
+                </body>
+                </html>
+              `;
+                            const msg = {
+                                to: enrollment_data.email_address,
+                                from: {
+                                    email: 'info@flowerschoolbengaluru.com',
+                                    name: 'Flower School Bengaluru'
+                                },
+                                subject: '🎉 Course Enrollment Completed - Welcome to Flower School Bengaluru!',
+                                html: enrollmentCompletionEmail
+                            };
+                            await sgMail.send(msg);
+                            console.log('Course enrollment completion email sent to:', enrollment_data.email_address);
                         }
-                        catch (whatsappError) {
-                            console.error('[PAYMENT WHATSAPP] Failed to send confirmation:', whatsappError);
-                            // Don't fail the payment if WhatsApp fails
+                        catch (emailError) {
+                            console.error('[PAYMENT EMAIL] Failed to send enrollment completion email:', emailError);
+                            // Don't fail the payment if email fails
                         }
                     });
                     res.json({
@@ -1054,6 +1100,124 @@ export async function registerRoutes(app) {
             console.error('Error fetching payment status:', error);
             res.status(500).json({
                 error: 'Failed to fetch payment status',
+                message: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    });
+    // Enhanced Payment Create Order - For immediate course payments with email notifications
+    app.post("/api/payment/create-order", async (req, res) => {
+        try {
+            const { amount, currency = 'INR', receipt, notes, courseDetails // New field for course information
+             } = req.body;
+            // Validate required fields
+            if (!amount || amount <= 0) {
+                return res.status(400).json({
+                    error: 'Invalid amount. Amount must be greater than 0'
+                });
+            }
+            // Create Razorpay order
+            const razorpayOrder = await razorpay.orders.create({
+                amount: Math.round(amount * 100), // Convert to paise (smallest currency unit)
+                currency,
+                receipt: receipt || `receipt_${Date.now()}`,
+                notes: notes || {}
+            });
+            console.log('Razorpay order created:', razorpayOrder.id);
+            // If course details are provided, send payment initiated email
+            if (courseDetails) {
+                try {
+                    const emailService = {
+                        async sendCoursePaymentInitiatedEmail(orderData, courseData) {
+                            const htmlContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Course Payment - Order Created</title>
+                </head>
+                <body style="margin: 0; padding: 0; background-color: #f7f7f7; font-family: Arial, sans-serif;">
+                  <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 40px 20px;">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                      <h1 style="color: #2d3748; margin: 0; font-size: 28px;">Flower School Bengaluru</h1>
+                      <p style="color: #666; margin: 5px 0 0 0;">Course Payment Order</p>
+                    </div>
+                    
+                    <div style="background-color: #fef5e7; border-left: 4px solid #f6ad55; padding: 20px; margin-bottom: 30px;">
+                      <h2 style="color: #2d3748; margin: 0 0 10px 0; font-size: 24px;">⏳ Payment Order Created</h2>
+                      <p style="color: #2d3748; margin: 0; font-size: 16px;">
+                        Your payment order has been created. Please complete the payment to confirm your enrollment.
+                      </p>
+                    </div>
+
+                    <div style="margin-bottom: 30px;">
+                      <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">💰 Payment Details</h3>
+                      <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
+                        <p style="margin: 0 0 10px 0;"><strong>Order ID:</strong> ${orderData.id}</p>
+                        <p style="margin: 0 0 10px 0;"><strong>Amount:</strong> ₹${(orderData.amount / 100).toLocaleString()}</p>
+                        <p style="margin: 0 0 10px 0;"><strong>Currency:</strong> ${orderData.currency}</p>
+                        <p style="margin: 0;"><strong>Receipt:</strong> ${orderData.receipt}</p>
+                      </div>
+                    </div>
+
+                    <div style="margin-bottom: 30px;">
+                      <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">📚 Course Details</h3>
+                      <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
+                        <p style="margin: 0 0 10px 0;"><strong>Student Name:</strong> ${courseData.full_name}</p>
+                        <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${courseData.email_address}</p>
+                        <p style="margin: 0 0 10px 0;"><strong>Phone:</strong> ${courseData.phone_number}</p>
+                        <p style="margin: 0 0 10px 0;"><strong>Course/Workshop:</strong> ${courseData.courses_or_workshops}</p>
+                        ${courseData.questions_or_comments ? `<p style="margin: 0;"><strong>Comments:</strong> ${courseData.questions_or_comments}</p>` : ''}
+                      </div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e2e8f0;">
+                      <p style="color: #666; margin: 0 0 10px 0; font-size: 14px;">
+                        Complete your payment to confirm enrollment. Need help?
+                      </p>
+                      <p style="color: #2d3748; margin: 0; font-weight: 600;">
+                        📧 info@flowerschoolbengaluru.com | 📞 +91 99728 03847
+                      </p>
+                    </div>
+                  </div>
+                </body>
+                </html>
+              `;
+                            const msg = {
+                                to: courseData.email_address,
+                                from: {
+                                    email: 'info@flowerschoolbengaluru.com',
+                                    name: 'Flower School Bengaluru'
+                                },
+                                subject: '⏳ Course Payment Order Created - Complete Your Payment',
+                                html: htmlContent
+                            };
+                            await sgMail.send(msg);
+                            console.log('Payment initiated email sent to:', courseData.email_address);
+                        }
+                    };
+                    await emailService.sendCoursePaymentInitiatedEmail(razorpayOrder, courseDetails);
+                }
+                catch (emailError) {
+                    console.error('Error sending payment initiated email:', emailError);
+                    // Don't fail the order creation if email fails
+                }
+            }
+            res.status(201).json({
+                success: true,
+                order: {
+                    id: razorpayOrder.id,
+                    amount: razorpayOrder.amount,
+                    currency: razorpayOrder.currency,
+                    receipt: razorpayOrder.receipt
+                },
+                key: config.razorpay.keyId
+            });
+        }
+        catch (error) {
+            console.error('Error creating Razorpay order:', error);
+            res.status(500).json({
+                error: 'Failed to create payment order',
                 message: error instanceof Error ? error.message : 'Unknown error'
             });
         }
@@ -1243,6 +1407,41 @@ export async function registerRoutes(app) {
             });
         }
     });
+    // SendGrid Email Test Route
+    app.post("/api/email/test", async (req, res) => {
+        try {
+            const { email } = req.body;
+            if (!email) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Email address is required'
+                });
+            }
+            console.log('[EMAIL TEST] Sending test email to:', email);
+            const emailSent = await emailService.sendTestEmail(email);
+            if (emailSent) {
+                res.status(200).json({
+                    success: true,
+                    message: 'Test email sent successfully',
+                    recipient: email
+                });
+            }
+            else {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to send test email'
+                });
+            }
+        }
+        catch (error) {
+            console.error('[EMAIL TEST] Error:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Internal server error',
+                message: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    });
     // Orders
     app.post("/api/orders", async (req, res) => {
         try {
@@ -1407,6 +1606,46 @@ export async function registerRoutes(app) {
                         ...createdOrder,
                         ...notificationData
                     });
+                    // Send order confirmation email
+                    try {
+                        console.log(`[EMAIL] Sending order confirmation email for order:`, {
+                            orderNumber: notificationData.orderNumber,
+                            customerEmail: createdOrder.email,
+                            customerName: notificationData.customerName
+                        });
+                        if (createdOrder.email) {
+                            const emailData = {
+                                orderNumber: notificationData.orderNumber,
+                                customerName: notificationData.customerName,
+                                customerEmail: createdOrder.email,
+                                items: notificationData.items.map(item => ({
+                                    name: item.name,
+                                    quantity: item.quantity,
+                                    price: item.price
+                                })),
+                                subtotal: orderProcessingResult.calculatedPricing?.subtotal || createdOrder.subtotal || '0',
+                                deliveryCharge: orderProcessingResult.calculatedPricing?.deliveryCharge || createdOrder.deliveryCharge || '0',
+                                discountAmount: orderProcessingResult.calculatedPricing?.discountAmount || createdOrder.discountAmount || '0',
+                                total: orderProcessingResult.calculatedPricing?.total || createdOrder.total || '0',
+                                paymentMethod: notificationData.paymentMethod,
+                                deliveryAddress: notificationData.deliveryAddress,
+                                estimatedDeliveryDate: notificationData.estimatedDeliveryDate.toISOString()
+                            };
+                            const emailSent = await emailService.sendOrderConfirmationEmail(emailData);
+                            if (emailSent) {
+                                console.log(`[EMAIL] Order confirmation email sent successfully for order ${notificationData.orderNumber}`);
+                            }
+                            else {
+                                console.log(`[EMAIL] Failed to send order confirmation email for order ${notificationData.orderNumber}`);
+                            }
+                        }
+                        else {
+                            console.log(`[EMAIL] No email address provided for order ${notificationData.orderNumber}, skipping email`);
+                        }
+                    }
+                    catch (emailError) {
+                        console.error(`[EMAIL] Error sending order confirmation email for order ${notificationData.orderNumber}:`, emailError instanceof Error ? emailError.message : 'Unknown email error');
+                    }
                     // Log overall notification status without PII
                     const notificationSummary = {
                         orderId: createdOrder.id,
@@ -2297,7 +2536,8 @@ export async function registerRoutes(app) {
                 });
             }
             console.error("Error creating address:", error);
-            res.status(500).json({ message: "Failed to create address" });
+            // Include a brief detail in development to help diagnose
+            res.status(500).json({ message: "Failed to create address", detail: error instanceof Error ? error.message : String(error) });
         }
     });
     app.delete("/api/addresses/:id", async (req, res) => {
@@ -2930,6 +3170,163 @@ export async function registerRoutes(app) {
             });
         }
     });
+    // ==================== Coupon Admin Routes ====================
+    // Get all coupons
+    app.get("/api/admin/coupons", async (req, res) => {
+        try {
+            const coupons = await storage.getAllCoupons();
+            res.json({
+                success: true,
+                data: coupons
+            });
+        }
+        catch (error) {
+            console.error("Error fetching coupons:", error);
+            res.status(500).json({
+                success: false,
+                error: "Failed to fetch coupons",
+                message: error instanceof Error ? error.message : "Unknown error occurred"
+            });
+        }
+    });
+    // Get single coupon by ID
+    app.get("/api/admin/coupons/:id", async (req, res) => {
+        try {
+            const coupons = await storage.getAllCoupons();
+            const coupon = coupons.find((c) => c.id === req.params.id);
+            if (!coupon) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Coupon not found"
+                });
+            }
+            res.json({
+                success: true,
+                data: coupon
+            });
+        }
+        catch (error) {
+            console.error("Error fetching coupon:", error);
+            res.status(500).json({
+                success: false,
+                error: "Failed to fetch coupon",
+                message: error instanceof Error ? error.message : "Unknown error occurred"
+            });
+        }
+    });
+    // Create new coupon
+    app.post("/api/admin/coupons", async (req, res) => {
+        try {
+            const { code, type, value, isActive, startsAt, expiresAt, minOrderAmount, maxDiscount, usageLimit, description } = req.body;
+            if (!code || !type || value === undefined) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Missing required fields: code, type, value"
+                });
+            }
+            if (!['percentage', 'fixed'].includes(type)) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Invalid coupon type. Must be 'percentage' or 'fixed'"
+                });
+            }
+            const coupon = await storage.createCoupon({
+                code: code.toUpperCase(),
+                type,
+                value: parseFloat(value),
+                isActive: isActive !== undefined ? Boolean(isActive) : true,
+                startsAt: startsAt || null,
+                expiresAt: expiresAt || null,
+                minOrderAmount: minOrderAmount ? parseFloat(minOrderAmount) : 0,
+                maxDiscount: maxDiscount ? parseFloat(maxDiscount) : null,
+                usageLimit: usageLimit ? parseInt(usageLimit) : null,
+                description: description || null
+            });
+            res.status(201).json({
+                success: true,
+                data: coupon
+            });
+        }
+        catch (error) {
+            console.error("Error creating coupon:", error);
+            res.status(500).json({
+                success: false,
+                error: "Failed to create coupon",
+                message: error instanceof Error ? error.message : "Unknown error occurred"
+            });
+        }
+    });
+    // Update coupon
+    app.put("/api/admin/coupons/:id", async (req, res) => {
+        try {
+            const updates = {};
+            const { code, type, value, isActive, startsAt, expiresAt, minOrderAmount, maxDiscount, usageLimit, description } = req.body;
+            if (code !== undefined)
+                updates.code = code.toUpperCase();
+            if (type !== undefined)
+                updates.type = type;
+            if (value !== undefined)
+                updates.value = parseFloat(value);
+            if (isActive !== undefined)
+                updates.isActive = Boolean(isActive);
+            if (startsAt !== undefined)
+                updates.startsAt = startsAt || null;
+            if (expiresAt !== undefined)
+                updates.expiresAt = expiresAt || null;
+            if (minOrderAmount !== undefined)
+                updates.minOrderAmount = parseFloat(minOrderAmount);
+            if (maxDiscount !== undefined)
+                updates.maxDiscount = maxDiscount ? parseFloat(maxDiscount) : null;
+            if (usageLimit !== undefined)
+                updates.usageLimit = usageLimit ? parseInt(usageLimit) : null;
+            if (description !== undefined)
+                updates.description = description || null;
+            const coupon = await storage.updateCoupon(req.params.id, updates);
+            res.json({
+                success: true,
+                data: coupon
+            });
+        }
+        catch (error) {
+            console.error("Error updating coupon:", error);
+            if (error instanceof Error && error.message.includes('not found')) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Coupon not found"
+                });
+            }
+            res.status(500).json({
+                success: false,
+                error: "Failed to update coupon",
+                message: error instanceof Error ? error.message : "Unknown error occurred"
+            });
+        }
+    });
+    // Delete coupon
+    app.delete("/api/admin/coupons/:id", async (req, res) => {
+        try {
+            await storage.deleteCoupon(req.params.id);
+            res.json({
+                success: true,
+                message: "Coupon deleted successfully"
+            });
+        }
+        catch (error) {
+            console.error("Error deleting coupon:", error);
+            if (error instanceof Error && error.message.includes('not found')) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Coupon not found"
+                });
+            }
+            res.status(500).json({
+                success: false,
+                error: "Failed to delete coupon",
+                message: error instanceof Error ? error.message : "Unknown error occurred"
+            });
+        }
+    });
+    // ==================== End Coupon Admin Routes ====================
     app.get("/api/landing/email", async (req, res) => {
         try {
             const subscriptions = await storage.getAllSubscriptions();

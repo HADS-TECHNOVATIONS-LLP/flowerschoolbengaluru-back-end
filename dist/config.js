@@ -3,7 +3,7 @@ dotenv.config();
 export const config = {
     nodeEnv: process.env.NODE_ENV || "development",
     database: {
-        url: process.env.DATABASE_URL || "postgres://postgres:2002@localhost:5432/bouquetbar"
+        url: process.env.DATABASE_URL || "postgres://postgres:Vyshnudevi7507@localhost:5432/bouquetbar"
     },
     razorpay: {
         keyId: process.env.RAZORPAY_KEY_ID || "rzp_live_RWo2zsTKLIGYbi",
@@ -52,6 +52,10 @@ export const config = {
             "support@bouquetbar.com",
             "vasuchouthri811@gmail.com"
         ]
+    },
+    sendgrid: {
+        apiKey: process.env.SENDGRID_API_KEY || "",
+        fromEmail: process.env.FROM_EMAIL || "info@flowerschoolbengaluru.com"
     },
     session: {
         secret: process.env.SESSION_SECRET || "dev_secret_change_in_production"
