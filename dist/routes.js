@@ -91,6 +91,14 @@ const cleanExpiredSessions = () => {
         }
     });
 };
+// Helper: calculate discount amount and final price
+const calculateDiscount = (originalPrice, discountPercentage) => {
+    const pct = typeof discountPercentage === 'number' && !isNaN(discountPercentage) ? Math.max(0, Math.min(100, discountPercentage)) : 0;
+    const discountAmount = +(originalPrice * (pct / 100));
+    const finalPrice = +(originalPrice - discountAmount);
+    // Round to 2 decimals for currency
+    return { discountAmount: Number(discountAmount.toFixed(2)), finalPrice: Number(finalPrice.toFixed(2)), discountPercentage: pct };
+};
 // Middleware to get user from session
 const getUserFromSession = async (req) => {
     cleanExpiredSessions();
@@ -795,49 +803,46 @@ export async function registerRoutes(app) {
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Course Details - Flower School Bengaluru</title>
           </head>
-          <body style="margin: 0; padding: 0; background-color: #f7f7f7; font-family: Arial, sans-serif;">
-            <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 40px 20px;">
-              <div style="text-align: center; margin-bottom: 30px;">
-                <h1 style="color: #2d3748; margin: 0; font-size: 28px;">Flower School Bengaluru</h1>
-                <p style="color: #666; margin: 5px 0 0 0;">Course Details & Information</p>
-              </div>
-              
-              <div style="background-color: #e6fffa; border-left: 4px solid #38b2ac; padding: 20px; margin-bottom: 30px;">
-                <h2 style="color: #2d3748; margin: 0 0 10px 0; font-size: 24px;">📚 Course Information Shared</h2>
-                <p style="color: #2d3748; margin: 0; font-size: 16px;">
-                  Thank you for your interest! Here are the course details you requested.
-                </p>
+          <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #1f2937;">
+            <div style="max-width: 700px; margin: 30px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 16px rgba(15,23,42,0.06);">
+              <div style="padding: 28px 32px; text-align: center; background: linear-gradient(90deg, #e6fffa 0%, #ebf8ff 100%);">
+                <h1 style="margin: 0; color: #0f172a; font-size: 22px;">Flower School Bengaluru</h1>
+                <p style="margin: 8px 0 0 0; color: #334155; font-size: 13px;">Course Details & Information</p>
               </div>
 
-              <div style="margin-bottom: 30px;">
-                <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">👤 Student Information</h3>
-                <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
-                  <p style="margin: 0 0 10px 0;"><strong>Name:</strong> ${payLaterData.full_name}</p>
-                  <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${payLaterData.email_address}</p>
-                  <p style="margin: 0 0 10px 0;"><strong>Phone:</strong> ${payLaterData.phone_number}</p>
-                  <p style="margin: 0 0 10px 0;"><strong>Course Interest:</strong> ${payLaterData.courses_or_workshops}</p>
+              <div style="padding: 20px 32px;">
+                <div style="background-color:#f0fdf4; border: 1px solid #bbf7d0; padding: 16px; border-radius: 6px; margin-bottom: 18px;">
+                  <strong style="display:block; font-size:16px; color:#065f46;">✅ Pay Later Request Received</strong>
+                  <p style="margin:6px 0 0 0; color:#065f46; font-size:14px;">We have received your request to pay later. Our team will call you shortly to confirm the details and help schedule the payment at your convenience.</p>
+                </div>
+
+                <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">👤 Student Information</h3>
+                <div style="background-color: #fbfcfd; padding: 14px; border-radius: 6px; border: 1px solid #e6eef6; margin-bottom: 18px;">
+                  <p style="margin: 0 0 8px 0;"><strong>Name:</strong> ${payLaterData.full_name}</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Email:</strong> ${payLaterData.email_address}</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Phone:</strong> ${payLaterData.phone_number}</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Course Interest:</strong> ${payLaterData.courses_or_workshops}</p>
                   ${payLaterData.questions_or_comments ? `<p style="margin: 0;"><strong>Questions:</strong> ${payLaterData.questions_or_comments}</p>` : ''}
+                </div>
+
+                <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">🌸 What's Next?</h3>
+                <div style="background:#fffdfa; padding: 14px; border-radius:6px; border:1px solid #fbe7c6; margin-bottom:18px;">
+                  <ul style="margin:0; padding-left:18px; color:#334155; line-height:1.6;">
+                    <li>We will call you within 24-48 hours to confirm your request.</li>
+                    <li>We will share the detailed curriculum, schedule and any preparatory notes.</li>
+                    <li>You can complete the payment later as per mutual convenience.</li>
+                    <li>Course materials will be provided upon enrollment and certificate issued after completion.</li>
+                  </ul>
+                </div>
+
+                <div style="text-align:center; margin-top: 10px;">
+                  <p style="margin:0 0 6px 0; color:#475569; font-size:13px;">Need immediate help?</p>
+                  <p style="margin:0; font-weight:600; color:#0f172a;">📧 <a href="mailto:info@flowerschoolbengaluru.com" style="color:#0f172a; text-decoration:none;">info@flowerschoolbengaluru.com</a> | 📞 +91 99728 03847</p>
                 </div>
               </div>
 
-              <div style="margin-bottom: 30px;">
-                <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">🌸 What's Next?</h3>
-                <ul style="color: #4a5568; line-height: 1.6;">
-                  <li>Our team will contact you within 24-48 hours</li>
-                  <li>We'll share detailed course curriculum and schedule</li>
-                  <li>Payment can be made later as per your convenience</li>
-                  <li>All course materials will be provided upon enrollment</li>
-                  <li>Certificate will be issued upon successful completion</li>
-                </ul>
-              </div>
-
-              <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e2e8f0;">
-                <p style="color: #666; margin: 0 0 10px 0; font-size: 14px;">
-                  Need immediate help? Contact us:
-                </p>
-                <p style="color: #2d3748; margin: 0; font-weight: 600;">
-                  📧 info@flowerschoolbengaluru.com | 📞 +91 99728 03847
-                </p>
+              <div style="background:#f8fafc; padding:12px 20px; text-align:center; font-size:12px; color:#6b7280;">
+                <div>Thank you for choosing Flower School Bengaluru — we look forward to having you with us 🌸</div>
               </div>
             </div>
           </body>
@@ -2831,7 +2836,34 @@ export async function registerRoutes(app) {
     app.put("/api/admin/products/:id", async (req, res) => {
         try {
             const { id } = req.params;
-            const updates = req.body;
+            // Normalize and compute pricing fields on the server as single source of truth
+            const raw = req.body || {};
+            const updates = { ...raw };
+            // Parse numeric fields if present
+            if (raw.price !== undefined)
+                updates.price = isNaN(Number(raw.price)) ? raw.price : Number(raw.price);
+            if (raw.originalPrice !== undefined)
+                updates.originalPrice = raw.originalPrice === null ? null : Number(raw.originalPrice);
+            if (raw.discountPercentage !== undefined)
+                updates.discountPercentage = raw.discountPercentage === null ? null : Number(raw.discountPercentage);
+            // If discountPercentage is provided (or exists) and originalPrice is present, compute discountAmount and final price
+            const hasPct = updates.discountPercentage !== undefined && updates.discountPercentage !== null && !isNaN(updates.discountPercentage);
+            const hasOriginal = updates.originalPrice !== undefined && updates.originalPrice !== null && !isNaN(updates.originalPrice);
+            if (hasPct && hasOriginal) {
+                const { discountAmount, finalPrice, discountPercentage } = calculateDiscount(Number(updates.originalPrice), Number(updates.discountPercentage));
+                updates.discountAmount = discountAmount;
+                updates.price = finalPrice;
+                updates.discountPercentage = discountPercentage;
+            }
+            // If discountPercentage is provided but originalPrice not provided, try to use current price as originalPrice
+            if (hasPct && !hasOriginal && updates.price !== undefined) {
+                const { discountAmount, finalPrice, discountPercentage } = calculateDiscount(Number(updates.price), Number(updates.discountPercentage));
+                // assume existing price was originalPrice — set both originalPrice and price accordingly
+                updates.originalPrice = Number(updates.price);
+                updates.discountAmount = discountAmount;
+                updates.price = finalPrice;
+                updates.discountPercentage = discountPercentage;
+            }
             console.log(`Updating product ${id} with:`, Object.keys(updates));
             const product = await storage.updateProduct(id, updates);
             res.json({
@@ -2855,9 +2887,17 @@ export async function registerRoutes(app) {
         try {
             console.log("Creating product (unified handler)");
             console.log('Incoming body (create unified):', JSON.stringify(req.body || {}));
-            const parseBool = (v) => v === true || v === 'true' || v === '1' || v === 1 || String(v).toLowerCase() === 'enable';
-            // Determine isCustom from multiple possible incoming shapes
-            const computedIsCustom = parseBool(req.body.isCustom) || parseBool(req.body.displayOption) || (req.body.custom !== undefined ? Boolean(parseInt(req.body.custom)) : false);
+            const parseBool = (v) => {
+                if (v === true || v === 1 || v === '1')
+                    return true;
+                if (typeof v === 'string') {
+                    const s = v.trim().toLowerCase();
+                    return ['true', 'yes', 'on', 'enable'].includes(s);
+                }
+                return false;
+            };
+            // Determine isCustom from multiple possible incoming shapes/field names
+            const computedIsCustom = parseBool(req.body.isCustom ?? req.body.iscustom ?? req.body.is_custom ?? req.body.custom ?? req.body.customLabel ?? req.body.custom_label ?? req.body.displayOption ?? req.body.display_option);
             console.log('Computed isCustom (create unified):', computedIsCustom);
             // Function to clean base64 data (if images are passed)
             const cleanBase64 = (base64String) => {
@@ -2870,26 +2910,74 @@ export async function registerRoutes(app) {
             };
             // Accept optional images array in the same create payload
             const images = Array.isArray(req.body.images) ? req.body.images : [];
-            const computedBestSeller = parseBool(req.body.isBestSeller) || parseBool(req.body.isbestseller);
+            const computedBestSeller = parseBool(req.body.isBestSeller ?? req.body.isbestseller ?? req.body.is_best_seller ?? req.body.is_bestSeller);
+            // Normalize incoming fields and compute discount server-side
+            const raw = req.body || {};
+            // Normalize category: accept array, JSON string, or comma-separated list
+            let categoryNorm = raw.category;
+            if (Array.isArray(raw.category)) {
+                categoryNorm = JSON.stringify(raw.category);
+            }
+            else if (typeof raw.category === 'string') {
+                const trimmed = raw.category.trim();
+                if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                    // leave as-is (assume valid JSON array)
+                    categoryNorm = trimmed;
+                }
+                else if (trimmed.includes(',')) {
+                    categoryNorm = JSON.stringify(trimmed.split(',').map((s) => s.trim()).filter(Boolean));
+                }
+                else {
+                    categoryNorm = trimmed;
+                }
+            }
+            // Accept multiple possible stock field names
+            const stockRaw = raw.stockQuantity ?? raw.stockquantity ?? raw.stock_quantity ?? raw.stock ?? 0;
+            const stockQuantity = stockRaw !== undefined ? Number(stockRaw) : 0;
             const productData = {
-                name: req.body.name,
-                description: req.body.description,
-                price: parseFloat(req.body.price),
-                category: Array.isArray(req.body.category) ? JSON.stringify(req.body.category) : req.body.category,
-                stockQuantity: parseInt(req.body.stockquantity),
-                inStock: req.body.instock !== undefined ? Boolean(req.body.instock) : true,
-                featured: req.body.featured || false,
+                name: raw.name,
+                description: raw.description,
+                // price will be final selling price; may be recalculated below
+                price: raw.price !== undefined ? Number(raw.price) : undefined,
+                originalPrice: raw.originalPrice !== undefined && raw.originalPrice !== null ? Number(raw.originalPrice) : undefined,
+                discountPercentage: raw.discountPercentage !== undefined && raw.discountPercentage !== null ? Number(raw.discountPercentage) : undefined,
+                discountAmount: raw.discountAmount !== undefined && raw.discountAmount !== null ? Number(raw.discountAmount) : undefined,
+                category: categoryNorm,
+                stockQuantity: isNaN(stockQuantity) ? 0 : stockQuantity,
+                inStock: (raw.inStock !== undefined ? raw.inStock : raw.instock) !== undefined ? Boolean(raw.inStock ?? raw.instock) : true,
+                featured: raw.featured || false,
                 isBestSeller: computedBestSeller || false,
                 isCustom: computedIsCustom,
-                colour: req.body.colour || null,
+                colour: raw.colour || null,
+                discounts_offers: Boolean(raw.discounts_offers),
                 image: cleanBase64(images[0]) || 'placeholder',
                 imagefirst: cleanBase64(images[1]) || null,
                 imagesecond: cleanBase64(images[2]) || null,
                 imagethirder: cleanBase64(images[3]) || null,
                 imagefoure: cleanBase64(images[4]) || null
             };
+            // Server-side pricing normalization: if discountPercentage is present, prefer originalPrice to compute discountAmount & final price
+            if (typeof productData.discountPercentage === 'number' && !isNaN(productData.discountPercentage)) {
+                // If originalPrice not provided, assume originalPrice equals provided price (or 0)
+                const orig = typeof productData.originalPrice === 'number' && !isNaN(productData.originalPrice) ? productData.originalPrice : (typeof productData.price === 'number' && !isNaN(productData.price) ? productData.price : 0);
+                const { discountAmount, finalPrice, discountPercentage } = calculateDiscount(Number(orig), Number(productData.discountPercentage));
+                productData.originalPrice = orig;
+                productData.discountAmount = discountAmount;
+                productData.price = finalPrice;
+                productData.discountPercentage = discountPercentage;
+            }
+            else {
+                // Ensure fields are present and normalized
+                if (productData.originalPrice === undefined && typeof productData.price === 'number') {
+                    productData.originalPrice = Number(productData.price);
+                }
+                if (productData.discountPercentage === undefined)
+                    productData.discountPercentage = 0;
+                if (productData.discountAmount === undefined)
+                    productData.discountAmount = 0;
+            }
             // Validate required fields
-            if (!productData.name || !productData.description || !productData.price || !productData.category) {
+            if (!productData.name || !productData.description || productData.price === undefined || !productData.category) {
                 return res.status(400).json({ error: "Missing required fields" });
             }
             const product = await storage.createProduct(productData);

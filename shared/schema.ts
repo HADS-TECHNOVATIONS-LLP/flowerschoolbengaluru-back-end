@@ -25,12 +25,24 @@ export const products = pgTable("products", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description").notNull(),
-  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(), // This becomes the selling price
+  originalPrice: decimal("original_price", { precision: 10, scale: 2 }), // Original price before discount
+  discountPercentage: integer("discount_percentage"), // Discount percentage (0-100)
+  discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }), // Actual discount amount in currency
   category: text("category").notNull(),
   image: text("image").notNull(),
+  imagefirst: text("imagefirst"),
+  imagesecond: text("imagesecond"), 
+  imagethirder: text("imagethirder"),
+  imagefoure: text("imagefoure"),
+  imagefive: text("imagefive"),
   stockQuantity: integer("stock_quantity").notNull().default(0),
   inStock: boolean("in_stock").default(true),
   featured: boolean("featured").default(false),
+  isBestSeller: boolean("isBestSeller").default(false),
+  isCustom: boolean("isCustom").default(false),
+  colour: text("colour"),
+  discountsOffers: boolean("discounts_offers").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
