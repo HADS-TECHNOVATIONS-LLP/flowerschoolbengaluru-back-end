@@ -1221,7 +1221,7 @@ return result.rows[0];
             stockQuantity > 0,
             productData.featured || false,
             productData.colour || null,
-            Boolean(productData.discounts_offers),
+productData.discounts_offers ? true : false,
             productData.image || null
           ]
         };
