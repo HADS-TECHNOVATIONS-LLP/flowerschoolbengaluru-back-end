@@ -1,5 +1,5 @@
 import sgMail from '@sendgrid/mail';
-import { config } from '../config';
+import { config } from '../config.js';
 
 // Initialize SendGrid with API key
 sgMail.setApiKey(config.sendgrid.apiKey);
