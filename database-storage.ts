@@ -1172,38 +1172,35 @@ return result.rows[0];
 }
   }
 
-async createProduct(productData: any): Promise < any > {
-  try {
-    // Accept multiple possible stock field names and coerce to integer
-    const stockRaw = productData.stockQuantity ?? productData.stockquantity ?? productData.stock ?? '0';
-    const stockQuantity = parseInt(String(stockRaw || '0'), 10);
-    if (isNaN(stockQuantity) || stockQuantity < 0) {
-      throw new Error('Invalid stock quantity. Must be a non-negative number.');
-    }
-
-    // Normalize category to a JSON string when an array is provided
-    const categoryValue = Array.isArray(productData.category) ? JSON.stringify(productData.category) : productData.category;
-
-    // Normalize price/original/discount values so we always insert consistent numbers
-    const normalizedPrice = (productData.price !== undefined && productData.price !== null) ? Number(productData.price) : (productData.originalPrice !== undefined && productData.originalPrice !== null ? Number(productData.originalPrice) : 0);
-    const normalizedOriginal = (productData.originalPrice !== undefined && productData.originalPrice !== null) ? Number(productData.originalPrice) : normalizedPrice;
-    const normalizedDiscountPercentage = (productData.discountPercentage !== undefined && productData.discountPercentage !== null)
-      ? Number(productData.discountPercentage)
-      : (productData.discount_percentage !== undefined && productData.discount_percentage !== null)
-        ? Number(productData.discount_percentage)
-        : 0;
-    const normalizedDiscountAmount = (productData.discountAmount !== undefined && productData.discountAmount !== null)
-      ? Number(productData.discountAmount)
-      : (productData.discount_amount !== undefined && productData.discount_amount !== null)
-        ? Number(productData.discount_amount)
-        : 0;
-
-    console.log("Creating product:---------------------------------------------------", {productData});
-
-    // First try with discount columns, if that fails (older schema), fall back to simple insert
+ async createProduct(productData: any): Promise<any> {
     try {
-      const query = {
-        text: `
+      // Accept multiple possible stock field names and coerce to integer
+      const stockRaw = productData.stockQuantity ?? productData.stockquantity ?? productData.stock ?? '0';
+      const stockQuantity = parseInt(String(stockRaw || '0'), 10);
+      if (isNaN(stockQuantity) || stockQuantity < 0) {
+        throw new Error('Invalid stock quantity. Must be a non-negative number.');
+      }
+
+      // Normalize category to a JSON string when an array is provided
+      const categoryValue = Array.isArray(productData.category) ? JSON.stringify(productData.category) : productData.category;
+
+      // Normalize price/original/discount values so we always insert consistent numbers
+      const normalizedPrice = (productData.price !== undefined && productData.price !== null) ? Number(productData.price) : (productData.originalPrice !== undefined && productData.originalPrice !== null ? Number(productData.originalPrice) : 0);
+      const normalizedOriginal = (productData.originalPrice !== undefined && productData.originalPrice !== null) ? Number(productData.originalPrice) : normalizedPrice;
+      const normalizedDiscountPercentage = (productData.discountPercentage !== undefined && productData.discountPercentage !== null)
+        ? Number(productData.discountPercentage)
+        : (productData.discount_percentage !== undefined && productData.discount_percentage !== null)
+          ? Number(productData.discount_percentage)
+          : 0;
+      const normalizedDiscountAmount = (productData.discountAmount !== undefined && productData.discountAmount !== null)
+        ? Number(productData.discountAmount)
+        : (productData.discount_amount !== undefined && productData.discount_amount !== null)
+          ? Number(productData.discount_amount)
+          : 0;
+
+      try {
+        const query = {
+          text: `
           INSERT INTO bouquetbar.products (
             name, description, price, originalprice, discount_percentage, discount_amount, category, stockquantity,
             "inStock", featured, colour, discounts_offers, image,
@@ -1212,35 +1209,30 @@ async createProduct(productData: any): Promise < any > {
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
           RETURNING *;
         `,
-        values: [
-          productData.name,
-          productData.description,
-          // price (final selling price)
-          normalizedPrice,
-          // original price (may be same as price)
-          (normalizedOriginal !== undefined && !isNaN(Number(normalizedOriginal))) ? normalizedOriginal : null,
-          // preserve 0 values (don't coerce with `||`)
-          (normalizedDiscountPercentage !== undefined && !isNaN(Number(normalizedDiscountPercentage))) ? normalizedDiscountPercentage : 0,
-          (normalizedDiscountAmount !== undefined && !isNaN(Number(normalizedDiscountAmount))) ? normalizedDiscountAmount : 0,
-          categoryValue,
-          stockQuantity,
-          stockQuantity > 0,
-          productData.featured || false,
-          productData.colour || null,
-          Boolean(productData.discounts_offers),
-          productData.image || null
-        ]
-      };
+          values: [
+            productData.name,
+            productData.description,
+            productData.price,
+            productData.originalPrice,
+            productData.discountPercentage,
+            productData.discountAmount,
+            categoryValue,
+            stockQuantity,
+            stockQuantity > 0,
+            productData.featured || false,
+            productData.colour || null,
+            Boolean(productData.discounts_offers),
+            productData.image || null
+          ]
+        };
 
-  console.log('Executing product insert (with discounts) values:', query.values);
-  const result = await db.query(query.text, query.values);
-      return result.rows[0];
-    } catch (columnError) {
-      // Most likely older DB schema without discount columns - fall back
-      console.log("Discount columns not found or insert failed, trying basic insert:", columnError && columnError.message ? columnError.message : columnError);
-
-      const basicQuery = {
-        text: `
+        console.log('Executing product insert (with discounts) values:', query.values);
+        const result = await db.query(query.text, query.values);
+        return result.rows[0];
+      } catch (columnError) {
+        console.log("Discount columns not found or insert failed, trying basic insert:", columnError && columnError.message ? columnError.message : columnError);
+        const basicQuery = {
+          text: `
           INSERT INTO bouquetbar.products (
             name, description, price, category, stockquantity,
             "inStock", featured, colour, discounts_offers, image,
@@ -1249,30 +1241,29 @@ async createProduct(productData: any): Promise < any > {
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
           RETURNING *;
         `,
-        values: [
-          productData.name,
-          productData.description,
-          normalizedPrice,
-          categoryValue,
-          stockQuantity,
-          stockQuantity > 0,
-          productData.featured || false,
-          productData.colour || null,
-          Boolean(productData.discounts_offers),
-          productData.image || null
-        ]
-      };
+          values: [
+            productData.name,
+            productData.description,
+            normalizedPrice,
+            categoryValue,
+            stockQuantity,
+            stockQuantity > 0,
+            productData.featured || false,
+            productData.colour || null,
+            Boolean(productData.discounts_offers),
+            productData.image || null
+          ]
+        };
 
-  console.log('Executing basic product insert values:', basicQuery.values);
-  const result = await db.query(basicQuery.text, basicQuery.values);
-      return result.rows[0];
+        console.log('Executing basic product insert values:', basicQuery.values);
+        const result = await db.query(basicQuery.text, basicQuery.values);
+        return result.rows[0];
+      }
+    } catch (error) {
+      console.error('Error in createProduct:', error);
+      throw new Error(`Failed to create product: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  } catch (error) {
-    console.error('Error in createProduct:', error);
-    throw new Error(`Failed to create product: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-}
- 
  
   async deleteProduct(id: string): Promise < void> {
   if(!id) {
