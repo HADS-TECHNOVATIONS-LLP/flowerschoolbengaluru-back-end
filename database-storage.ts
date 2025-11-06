@@ -1042,11 +1042,17 @@ if (updates.featured !== undefined) {
   valueCount++;
 }
 
-// Handle isBestSeller field (supports both camelCase and lowercase)
-const bestSellerValue = (updates as any).isBestSeller ?? (updates as any).isbestseller;
-if (bestSellerValue !== undefined) {
-  updateFields.push(`isBestSeller = $${valueCount}`);
-  values.push(bestSellerValue);
+// Handle iscustom field
+if ((updates as any).iscustom !== undefined) {
+  updateFields.push(`iscustom = $${valueCount}`);
+  values.push(Boolean((updates as any).iscustom));
+  valueCount++;
+}
+
+// Handle isbestseller field
+if ((updates as any).isbestseller !== undefined) {
+  updateFields.push(`isbestseller = $${valueCount}`);
+  values.push(Boolean((updates as any).isbestseller));
   valueCount++;
 }
 
@@ -1097,12 +1103,7 @@ if ((updates as any).imagefive !== undefined) {
 // Handle colour field
 // (removed duplicate colour handler to avoid multiple assignments)
 
-// Handle isCustom field
-if ((updates as any).isCustom !== undefined) {
-  updateFields.push(`isCustom = $${valueCount}`);
-  values.push((updates as any).isCustom);
-  valueCount++;
-}
+// isCustom field removed - no longer exists
 
 if ((updates as any).colour !== undefined) {
   updateFields.push(`colour = $${valueCount}`);
@@ -1119,7 +1120,9 @@ if ((updates as any).discounts_offers !== undefined) {
 
 // Handle originalPrice field
 if ((updates as any).originalPrice !== undefined) {
-  updateFields.push(`original_price = $${valueCount}`);
+  // NOTE: database column is named `originalprice` (no underscore) elsewhere in the codebase
+  // (createProduct inserts into `originalprice`), so update the same column name here
+  updateFields.push(`originalprice = $${valueCount}`);
   const originalPrice = (updates as any).originalPrice;
   values.push(originalPrice === null ? null : parseFloat(originalPrice));
   valueCount++;
@@ -1203,10 +1206,10 @@ return result.rows[0];
           text: `
           INSERT INTO bouquetbar.products (
             name, description, price, originalprice, discount_percentage, discount_amount, category, stockquantity,
-            "inStock", featured, colour, discounts_offers, image,
+            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image,
             createdat
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
           RETURNING *;
         `,
           values: [
@@ -1220,8 +1223,10 @@ return result.rows[0];
             stockQuantity,
             stockQuantity > 0,
             productData.featured || false,
+            productData.iscustom || false,
+            productData.isbestseller || false,
             productData.colour || null,
-productData.discounts_offers ? true : false,
+            productData.discounts_offers ? true : false,
             productData.image || null
           ]
         };
@@ -1235,10 +1240,10 @@ productData.discounts_offers ? true : false,
           text: `
           INSERT INTO bouquetbar.products (
             name, description, price, category, stockquantity,
-            "inStock", featured, colour, discounts_offers, image,
+            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image,
             createdat
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
           RETURNING *;
         `,
           values: [
@@ -1249,6 +1254,8 @@ productData.discounts_offers ? true : false,
             stockQuantity,
             stockQuantity > 0,
             productData.featured || false,
+            productData.iscustom || false,
+            productData.isbestseller || false,
             productData.colour || null,
             Boolean(productData.discounts_offers),
             productData.image || null
