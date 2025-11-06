@@ -370,14 +370,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/signin", async (req, res) => {
     try {
       const { email, password } = req.body;
-      if (!email || !password) {
-        return res.status(400).json({ message: "Email and password are required" });
-      }
+      if (!email) {
+      return res.status(400).json({ 
+        status: 'error',
+        message: "Email is required",
+        error: "Missing email address",
+        details: "Please enter your email address to sign in"
+      });
+    }
+    if (!password) {
+      return res.status(400).json({ 
+        status: 'error',
+        message: "Password is required",
+        error: "Missing password",
+        details: "Please enter your password to sign in"
+      });
+    }
 
       // Find user
       const user = await storage.getUserByEmail(email, password);
       if (!user) {
-        return res.status(401).json({ message: "Invalid credentials. User not found" });
+        return "Incorrect password, Please Enter the correct password";
       }
 
       // Create session
@@ -721,10 +734,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
    app.get("/api/products", async (req, res) => {
     try {
-      const { category, subcategory, search, minPrice, maxPrice, inStock, featured } = req.query;
-      // Also support best-seller filtering from query
-      const bestSellerParam = (req.query.bestSeller ?? req.query.isBestSeller)?.toString() || '';
-      const wantBestSellerOnly = bestSellerParam.toLowerCase() === 'true';
+      const { category, subcategory, search, minPrice, maxPrice, inStock, featured, bestSeller } = req.query;
 
       // If category, subcategory, or search is specified, use enhanced filtering
       if (category || subcategory || search) {
@@ -735,11 +745,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         
         // Apply additional filters if provided
-        let filteredProducts = products.map((p: any) => ({
-          ...p,
-          // Provide lowercase alias for clients that expect it
-          isbestseller: p.isBestSeller ?? p.isbestseller ?? false,
-        }));
+        let filteredProducts = products;
         
         // Filter by price range
         if (minPrice || maxPrice) {
@@ -761,9 +767,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           filteredProducts = filteredProducts.filter(product => product.featured);
         }
 
-        // Filter by best seller status if requested
-        if (wantBestSellerOnly) {
-          filteredProducts = filteredProducts.filter((product: any) => product.isBestSeller === true || product.isbestseller === true);
+        // Filter by best seller status
+        if (bestSeller === 'true') {
+          filteredProducts = filteredProducts.filter(product => product.isbestseller);
         }
         
         console.log(`Products API: Found ${filteredProducts.length} products for category="${category}" subcategory="${subcategory}" search="${search}"`);
@@ -773,16 +779,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Otherwise get all products
       let products = await storage.getAllProducts();
-      // Map alias and apply best-seller filter if required
-      let out = products.map((p: any) => ({
-        ...p,
-        isbestseller: p.isBestSeller ?? p.isbestseller ?? false,
-      }));
-      if (wantBestSellerOnly) {
-        out = out.filter((p: any) => p.isBestSeller === true || p.isbestseller === true);
+      
+      // Apply best seller filter if specified
+      if (req.query.bestSeller === 'true') {
+        products = products.filter(product => product.isbestseller);
       }
+      
       res.set('Cache-Control', 'no-store');
-      res.status(200).json(out);
+      res.status(200).json(products);
     } catch (error) {
       console.error("Error fetching products:", error);
       res.status(500).json({ message: "Failed to fetch products" });
@@ -2993,10 +2997,12 @@ app.get("/api/categoryuserdata", async (req, res) => {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(req.body.email)) {
         return res.status(400).json({
-          success: false,
-          error: 'Invalid email format'
-        });
-      }
+        status: 'error',
+        message: "Invalid email format",
+        error: "Email format error",
+        details: "Please enter a valid email address (e.g., example@email.com)"
+      });
+    }
 
       // Validate phone number (assuming Indian format)
       const phoneRegex = /^[6-9]\d{9}$/;
@@ -3097,12 +3103,13 @@ app.get("/api/categoryuserdata", async (req, res) => {
 
       let products = await storage.getAllProducts();
 
-      // Provide lowercase alias for clients that expect it and optionally strip extra images
+      // Optionally exclude bulky image fields to keep the payload light
       const out = (products || []).map((p: any) => {
         const base: any = {
           ...p,
-          // Alias for UI code that may expect lowercase
-          isbestseller: p.isBestSeller ?? p.isbestseller ?? false,
+          // Include isbestseller and iscustom fields
+          isbestseller: p.isbestseller || false,
+          iscustom: p.iscustom || false,
         };
         if (!includeImages) {
           // Keep primary image for thumbnails but drop the rest to reduce size
@@ -3145,10 +3152,57 @@ app.get("/api/categoryuserdata", async (req, res) => {
       const raw = req.body || {};
       const updates: any = { ...raw };
 
-      // Parse numeric fields if present
+      // Parse boolean helper function
+      const parseBool = (v: any) => {
+        if (v === true || v === 1 || v === '1') return true;
+        if (typeof v === 'string') {
+          const s = v.trim().toLowerCase();
+          return ['true', 'yes', 'on', 'enable'].includes(s);
+        }
+        return false;
+      };
+
+      // Parse boolean fields for product options
+      if (raw.iscustom !== undefined) updates.iscustom = parseBool(raw.iscustom);
+      if (raw.isCustom !== undefined) updates.iscustom = parseBool(raw.isCustom);
+      if (raw.isbestseller !== undefined) updates.isbestseller = parseBool(raw.isbestseller);
+      if (raw.isBestSeller !== undefined) updates.isbestseller = parseBool(raw.isBestSeller);
+      if (raw.featured !== undefined) updates.featured = parseBool(raw.featured);
+      
+      // Map discounts_offers field correctly (frontend sends as discounts_offers, database expects discountsOffers)
+      if (raw.discounts_offers !== undefined) {
+        updates.discountsOffers = parseBool(raw.discounts_offers);
+        
+        // If discounts_offers is being set to false, clear all discount-related fields
+        if (!parseBool(raw.discounts_offers)) {
+          updates.originalPrice = null;
+          updates.discountPercentage = null;
+          updates.discountAmount = null;
+        }
+      }
+
+      // Parse numeric fields if present and map to correct database field names
       if (raw.price !== undefined) updates.price = isNaN(Number(raw.price)) ? raw.price : Number(raw.price);
-      if (raw.originalPrice !== undefined) updates.originalPrice = raw.originalPrice === null ? null : Number(raw.originalPrice);
-      if (raw.discountPercentage !== undefined) updates.discountPercentage = raw.discountPercentage === null ? null : Number(raw.discountPercentage);
+      
+      // Handle stockQuantity field mapping (frontend might send stockquantity, stockQuantity, or stock_quantity)
+      if (raw.stockquantity !== undefined) updates.stockQuantity = Number(raw.stockquantity);
+      if (raw.stockQuantity !== undefined) updates.stockQuantity = Number(raw.stockQuantity);
+      if (raw.stock_quantity !== undefined) updates.stockQuantity = Number(raw.stock_quantity);
+      
+      // Handle inStock field mapping (frontend might send instock or inStock)
+      if (raw.instock !== undefined) updates.inStock = Boolean(raw.instock);
+      if (raw.inStock !== undefined) updates.inStock = Boolean(raw.inStock);
+      
+      // Map frontend camelCase to database snake_case field names
+      if (raw.originalPrice !== undefined) {
+        const originalPriceValue = raw.originalPrice === null ? null : Number(raw.originalPrice);
+        updates.originalPrice = originalPriceValue; // This will be mapped to original_price by the ORM
+      }
+      
+      if (raw.discountPercentage !== undefined) {
+        const discountPercentageValue = raw.discountPercentage === null ? null : Number(raw.discountPercentage);
+        updates.discountPercentage = discountPercentageValue; // This will be mapped to discount_percentage by the ORM
+      }
 
       // If discountPercentage is provided (or exists) and originalPrice is present, compute discountAmount and final price
       const hasPct = updates.discountPercentage !== undefined && updates.discountPercentage !== null && !isNaN(updates.discountPercentage);
@@ -3156,7 +3210,7 @@ app.get("/api/categoryuserdata", async (req, res) => {
 
       if (hasPct && hasOriginal) {
         const { discountAmount, finalPrice, discountPercentage } = calculateDiscount(Number(updates.originalPrice), Number(updates.discountPercentage));
-        updates.discountAmount = discountAmount;
+        updates.discountAmount = discountAmount; // This will be mapped to discount_amount by the ORM
         updates.price = finalPrice;
         updates.discountPercentage = discountPercentage;
       }
@@ -3191,7 +3245,7 @@ app.get("/api/categoryuserdata", async (req, res) => {
   });
 
   // Unified create product handler (accepts optional images)
-   // Unified create product handler (accepts optional images)
+ 
   app.post("/api/admin/products", async (req, res) => {
     try {
       console.log("Creating product (unified handler)");
@@ -3206,10 +3260,6 @@ app.get("/api/categoryuserdata", async (req, res) => {
         return false;
       };
 
-      // Determine isCustom from multiple possible incoming shapes/field names
-      const computedIsCustom = parseBool(req.body.isCustom ?? req.body.iscustom ?? req.body.is_custom ?? req.body.custom ?? req.body.customLabel ?? req.body.custom_label ?? req.body.displayOption ?? req.body.display_option);
-      console.log('Computed isCustom (create unified):', computedIsCustom);
- 
       // Function to clean base64 data (if images are passed)
       const cleanBase64 = (base64String: string | undefined) => {
         if (!base64String) return null;
@@ -3222,10 +3272,12 @@ app.get("/api/categoryuserdata", async (req, res) => {
       // Accept optional images array in the same create payload
   const images = Array.isArray(req.body.images) ? req.body.images : [];
 
-  const computedBestSeller = parseBool(req.body.isBestSeller ?? req.body.isbestseller ?? req.body.is_best_seller ?? req.body.is_bestSeller);
-
       // Normalize incoming fields and compute discount server-side
       const raw = req.body || {};
+
+      // Parse boolean fields for iscustom and isbestseller after raw is declared
+      const computedIsCustom = parseBool(raw.iscustom || raw.isCustom || raw.is_custom);
+      const computedBestSeller = parseBool(raw.isbestseller || raw.isBestSeller || raw.is_best_seller || raw.bestSeller);
 
       // Normalize category: accept array, JSON string, or comma-separated list
       let categoryNorm: any = raw.category;
@@ -3259,8 +3311,8 @@ app.get("/api/categoryuserdata", async (req, res) => {
         stockQuantity: isNaN(stockQuantity) ? 0 : stockQuantity,
         inStock: (raw.inStock !== undefined ? raw.inStock : raw.instock) !== undefined ? Boolean(raw.inStock ?? raw.instock) : true,
         featured: raw.featured || false,
-        isBestSeller: computedBestSeller || false,
-        isCustom: computedIsCustom,
+        iscustom: computedIsCustom,
+        isbestseller: computedBestSeller,
         colour: raw.colour || null,
         discounts_offers: Boolean(raw.discounts_offers),
         image: cleanBase64(images[0]) || 'placeholder',
@@ -3378,7 +3430,7 @@ app.get("/api/categoryuserdata", async (req, res) => {
     }
   });
 
-  // Duplicate create handler removed — images and isCustom parsing are handled by the unified POST /api/admin/products above.
+  // Duplicate create handler removed — images and other fields are handled by the unified POST /api/admin/products above.
 
   app.get("/api/admin/orders", async (req, res) => {
     try {

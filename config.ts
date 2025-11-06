@@ -4,7 +4,7 @@ dotenv.config();
 export const config = {
   nodeEnv: process.env.NODE_ENV || "development",
   database: {
-    url: process.env.DATABASE_URL || "postgres://postgres:Vyshnudevi7507@localhost:5432/bouquetbar"
+    url: process.env.DATABASE_URL || "postgres://postgres:2002@localhost:5432/bouquetbar"
   },
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || "rzp_live_RWo2zsTKLIGYbi",
@@ -30,15 +30,17 @@ export const config = {
     host: process.env.HOST || "0.0.0.0",
     cors: {
       origins: (process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(",") : [
-        // Local development
+        // Local development ports - updated
         "http://localhost:5173",
-        "http://localhost:5174",
+        "http://localhost:5174", 
         "http://localhost:4173",
         "http://localhost:8080",
         "http://localhost:8081",
+        "http://localhost:8082",
+        "http://localhost:3000",
         "http://localhost:5000",
         "https://localhost:5000",
-        // Production domains - THESE WERE MISSING IN YOUR LOGS!
+        // Production domains
         "https://flowerschoolbengaluru.com",
         "https://app.flowerschoolbengaluru.com",
         "http://flowerschoolbengaluru.com",
