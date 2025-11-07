@@ -387,11 +387,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
 
-      // Find user
-      const user = await storage.getUserByEmail(email, password);
-      if (!user) {
-        return "Incorrect password, Please Enter the correct password";
+      // Find user by email first
+      const userByEmail = await storage.getUserByEmailOnly(email);
+      if (!userByEmail) {
+        // Email not found — return minimal message for frontend
+        return res.status(401).json({ message: 'Email incorrect' });
       }
+
+      // Verify password (storage currently stores plain password)
+      // If your storage uses hashing, replace with bcrypt.compare
+      const storedPassword = (userByEmail as any).password;
+      if (storedPassword !== password) {
+        // Password mismatch — return minimal message for frontend
+        return res.status(401).json({ message: 'Incorrect password' });
+      }
+
+      // At this point email and password match; use this user
+      const user = userByEmail;
 
       // Create session
       const sessionToken = generateSessionToken();
@@ -405,12 +417,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
 
-      // Return user without password
-      const { password: _, ...userWithoutPassword } = user;
-      res.json({ user: userWithoutPassword, message: "Signed in successfully", sessionToken });
+  // Return user without password
+  const { password: _, ...userWithoutPassword } = user as any;
+  res.json({ status: 'success', user: userWithoutPassword, message: "Signed in successfully", sessionToken });
     } catch (error) {
       console.error("Signin error:", error);
       res.status(500).json({ message: "Failed to sign in" });
+    }
+  });
+
+  // Credential check endpoint used by client to decide whether to show create-account modal
+  app.post("/api/auth/credential-check", async (req, res) => {
+    try {
+      const { email, password } = req.body || {};
+      // If neither provided, return bad request
+      if (!email && !password) {
+        return res.status(400).json({ message: 'Email or password required' });
+      }
+
+      const emailExists = !!(email && await storage.getUserByEmailOnly(email));
+      // Check whether any account uses this password (storage may be plain-text in this app)
+      const passwordMatchesAny = !!(password && await storage.passwordExists(password));
+
+      return res.json({ emailExists, passwordMatchesAny });
+    } catch (error) {
+      console.error('Credential check error:', error);
+      return res.status(500).json({ message: 'Failed to check credentials' });
     }
   });
 
@@ -792,6 +824,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to fetch products" });
     }
   }); 
+
+
   app.get("/api/products/featured", async (req, res) => {
     try {
       const products = await storage.getFeaturedProducts();
@@ -801,6 +835,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  
   app.get("/api/products/:id", async (req, res) => {
     try {
       const product = await storage.getProduct(req.params.id);
@@ -2993,14 +3028,14 @@ app.get("/api/categoryuserdata", async (req, res) => {
         }
       }
 
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      // Validate email format - only allow .com addresses
+      const emailRegex = /^[^\s@]+@[^\s@]+\.com$/i;
       if (!emailRegex.test(req.body.email)) {
         return res.status(400).json({
         status: 'error',
         message: "Invalid email format",
         error: "Email format error",
-        details: "Please enter a valid email address (e.g., example@email.com)"
+        details: "Please enter a valid .com email address (e.g., example@example.com)"
       });
     }
 
@@ -4099,12 +4134,12 @@ app.get("/api/categoryuserdata", async (req, res) => {
         });
       }
 
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      // Validate email format - only allow .com addresses
+      const emailRegex = /^[^\s@]+@[^\s@]+\.com$/i;
       if (!emailRegex.test(email)) {
         return res.status(400).json({
           success: false,
-          error: "Invalid email format"
+          error: "Invalid email format - only .com addresses are allowed"
         });
       }
 
@@ -4170,11 +4205,11 @@ app.get("/api/categoryuserdata", async (req, res) => {
 
       // Validate email format if email is being updated
       if (updates.email) {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const emailRegex = /^[^\s@]+@[^\s@]+\.com$/i;
         if (!emailRegex.test(updates.email)) {
           return res.status(400).json({
             success: false,
-            error: "Invalid email format"
+            error: "Invalid email format - only .com addresses are allowed"
           });
         }
         updates.email = updates.email.trim().toLowerCase();

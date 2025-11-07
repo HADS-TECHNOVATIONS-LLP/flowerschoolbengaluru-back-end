@@ -150,6 +150,22 @@ export class DatabaseStorage implements IStorage {
   return result.rows[0] || undefined;
 }
 
+  // Check if any user account uses the given password
+  async passwordExists(password: string): Promise<boolean> {
+    try {
+      if (!password) return false;
+      const query = {
+        text: `SELECT 1 FROM bouquetbar.users WHERE password = $1 LIMIT 1;`,
+        values: [password]
+      };
+      const result = await db.query(query.text, query.values);
+      return Array.isArray(result.rows) && result.rows.length > 0;
+    } catch (error) {
+      console.error('Error checking password existence:', error);
+      return false;
+    }
+  }
+
   async createUser(insertUser: InsertUser): Promise < User > {
   try {
     // Input validation
@@ -169,10 +185,10 @@ if (!insertUser.password?.trim()) {
   throw new Error('Password is required');
 }
 
-// Email format validation
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Email format validation (only allow .com addresses)
+const emailRegex = /^[^\s@]+@[^\s@]+\.com$/i;
 if (!emailRegex.test(insertUser.email)) {
-  throw new Error('Invalid email format');
+  throw new Error('Invalid email format - only .com addresses are allowed');
 }
 
 const query = {
@@ -3634,7 +3650,7 @@ return result.rows || [];
   async addEmailSubscription(email: string): Promise < any > {
   try {
     // Email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.com$/i;
     if(!emailRegex.test(email)) {
   throw new Error('Invalid email format');
 }
@@ -3681,9 +3697,9 @@ return {
 }
 
 // Basic email validation
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailRegex = /^[^\s@]+@[^\s@]+\.com$/i;
 if (!emailRegex.test(contact.email)) {
-  throw new Error('Invalid email format');
+  throw new Error('Invalid email format - only .com addresses are allowed');
 }
 
 // Ensure table exists with new columns (safe to run repeatedly)

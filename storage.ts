@@ -8,6 +8,8 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string,password: string): Promise<User | undefined>;
   getUserByPhone(phone: string): Promise<User | undefined>;
+  // Check if any user has this exact password (used for login heuristics)
+  passwordExists(password: string): Promise<boolean>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<User>): Promise<User>;
   updateUserProfile(id: string, profile: Partial<User>): Promise<User>;
@@ -598,6 +600,11 @@ export class MemStorage implements IStorage {
 
   async getUserByPhone(phone: string): Promise<User | undefined> {
     return Array.from(this.users.values()).find(user => user.phone === phone);
+  }
+
+  async passwordExists(password: string): Promise<boolean> {
+    if (!password) return false;
+    return Array.from(this.users.values()).some(user => user.password === password);
   }
 
   async updateUser(id: string, updates: Partial<User>): Promise<User> {
