@@ -382,17 +382,48 @@ export class DatabaseStorage {
             const params = [];
             const searchClauses = [];
             // Helper function to add search clauses for a term
+            // This will also add simple variants (singular/plural and punctuation-stripped)
+            // so searches like "Lilies" will match product names stored as "Lily" or "Lilies".
             const addSearchClause = (term, description) => {
-                const paramIndex = params.length + 1;
-                params.push(`%${term}%`);
-                const clause = `(
-          LOWER(category) LIKE LOWER($${paramIndex}) OR 
-          LOWER(subcategory) LIKE LOWER($${paramIndex}) OR
-          LOWER(name) LIKE LOWER($${paramIndex}) OR 
-          LOWER(description) LIKE LOWER($${paramIndex})
-        )`;
-                searchClauses.push(clause);
-                console.log(`Added search clause for ${description}: ${term}`);
+                const variants = new Set();
+                const cleaned = term.trim();
+                if (!cleaned)
+                    return;
+                variants.add(cleaned);
+                // simple singularization rules: handle common plural endings
+                if (/ies$/i.test(cleaned)) {
+                    // lilies -> lily
+                    variants.add(cleaned.replace(/ies$/i, 'y'));
+                }
+                else if (/ves$/i.test(cleaned)) {
+                    // e.g., 'leaves' -> 'leaf' (best-effort)
+                    variants.add(cleaned.replace(/ves$/i, 'f'));
+                }
+                else if (/s$/i.test(cleaned)) {
+                    // generic plural ending: remove trailing 's'
+                    variants.add(cleaned.replace(/s$/i, ''));
+                }
+                // stripped punctuation variant
+                const alnum = cleaned.replace(/[^a-zA-Z0-9 ]+/g, '').trim();
+                if (alnum && alnum !== cleaned)
+                    variants.add(alnum);
+                // Build clause that checks all variants (OR between variants)
+                const variantClauses = [];
+                variants.forEach((v) => {
+                    const paramIndex = params.length + 1;
+                    params.push(`%${v}%`);
+                    variantClauses.push(`(
+            LOWER(category) LIKE LOWER($${paramIndex}) OR 
+            LOWER(subcategory) LIKE LOWER($${paramIndex}) OR
+            LOWER(name) LIKE LOWER($${paramIndex}) OR 
+            LOWER(description) LIKE LOWER($${paramIndex})
+          )`);
+                });
+                if (variantClauses.length > 0) {
+                    const clause = `(${variantClauses.join(' OR ')})`;
+                    searchClauses.push(clause);
+                    console.log(`Added search clause for ${description}: ${Array.from(variants).join(', ')}`);
+                }
             };
             // Handle category search (ignore if it's just a navigation category like "flower-types")
             if (category && category !== 'flower-types' && category.toLowerCase() !== 'all') {
@@ -401,24 +432,9 @@ export class DatabaseStorage {
             // Handle subcategory search - support comma-separated values for multi-select
             if (subcategory) {
                 const subcategories = subcategory.split(',').map(s => s.trim()).filter(Boolean);
-                if (subcategories.length > 1) {
-                    // Multiple subcategories - create OR clause for each
-                    const subcategoryClauses = subcategories.map((sub) => {
-                        const paramIndex = params.length + 1;
-                        params.push(`%${sub}%`);
-                        return `(
-              LOWER(category) LIKE LOWER($${paramIndex}) OR 
-              LOWER(subcategory) LIKE LOWER($${paramIndex}) OR
-              LOWER(name) LIKE LOWER($${paramIndex}) OR 
-              LOWER(description) LIKE LOWER($${paramIndex})
-            )`;
-                    });
-                    searchClauses.push(`(${subcategoryClauses.join(' OR ')})`);
-                    console.log(`Added multi-subcategory search for: ${subcategories.join(', ')}`);
-                }
-                else {
-                    // Single subcategory
-                    addSearchClause(subcategories[0], 'subcategory');
+                if (subcategories.length > 0) {
+                    // Use addSearchClause for each subcategory so variants are handled consistently
+                    subcategories.forEach(sub => addSearchClause(sub, 'subcategory'));
                 }
             }
             // Handle keyword search
@@ -426,7 +442,10 @@ export class DatabaseStorage {
                 addSearchClause(searchKeyword, 'keyword');
             }
             // Build WHERE clause
-            let where = `"inStock" = true AND isactive = true`;
+            // Do not force inStock=true here; routes.ts will apply the inStock filter when requested.
+            // Returning all active products for category/subcategory/search allows the frontend to
+            // show out-of-stock items if desired (and keeps results consistent across categories).
+            let where = `isactive = true`;
             if (searchClauses.length > 0) {
                 // Use OR to combine search clauses for broader matching
                 where += ` AND (${searchClauses.join(' OR ')})`;

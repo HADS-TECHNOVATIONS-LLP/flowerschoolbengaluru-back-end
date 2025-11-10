@@ -23,6 +23,20 @@ const razorpay = new Razorpay({
     key_id: config.razorpay.keyId,
     key_secret: config.razorpay.keySecret,
 });
+// Helper function to normalize product stock status
+const normalizeProductStockStatus = (product) => {
+    const stockQuantity = parseInt(product.stockQuantity || product.stockquantity || '0');
+    return {
+        ...product,
+        stockquantity: stockQuantity,
+        stockQuantity: stockQuantity,
+        inStock: stockQuantity > 0 && (product.inStock !== false)
+    };
+};
+// Helper function to normalize array of products
+const normalizeProductsStockStatus = (products) => {
+    return products.map(normalizeProductStockStatus);
+};
 // Initialize Twilio client for Verify service
 const twilioClient = twilio(config.twilio.accountSid, config.twilio.authToken);
 // Helper function to generate OTP
@@ -677,8 +691,9 @@ export async function registerRoutes(app) {
             // If category, subcategory, or search is specified, use enhanced filtering
             if (category || subcategory || search) {
                 const products = await storage.getProductsByCategoryAndSubcategory(category?.toString() || '', subcategory?.toString(), search?.toString());
+                // Normalize stock status first
+                let filteredProducts = normalizeProductsStockStatus(products);
                 // Apply additional filters if provided
-                let filteredProducts = products;
                 // Filter by price range
                 if (minPrice || maxPrice) {
                     filteredProducts = filteredProducts.filter(product => {
@@ -700,12 +715,113 @@ export async function registerRoutes(app) {
                 if (bestSeller === 'true') {
                     filteredProducts = filteredProducts.filter(product => product.isbestseller);
                 }
+                // Additional server-side filtering for client multi-filters (flowerTypes, arrangements, colors)
+                // These query params are sometimes sent by the client but weren't applied previously —
+                // apply lightweight, case-insensitive substring matching on the product.category (which
+                // may be a JSON-string), subcategory, name, and description so multi-filter queries
+                // return the expected results.
+                const flowerTypesParam = (req.query.flowerTypes || '').toString();
+                const arrangementsParam = (req.query.arrangements || '').toString();
+                const colorsParam = (req.query.colors || '').toString();
+                const parseCategoryToArray = (cat) => {
+                    if (!cat)
+                        return [];
+                    try {
+                        if (Array.isArray(cat))
+                            return cat.map((c) => String(c).toLowerCase().trim());
+                        if (typeof cat === 'string') {
+                            const s = cat.trim();
+                            if (s.startsWith('[') && s.endsWith(']')) {
+                                const parsed = JSON.parse(s);
+                                if (Array.isArray(parsed))
+                                    return parsed.map((c) => String(c).toLowerCase().trim());
+                            }
+                            // split on commas or semicolons as a fallback
+                            return s.split(/[,;]+/).map((c) => c.replace(/["\[\]]+/g, '').toLowerCase().trim()).filter(Boolean);
+                        }
+                    }
+                    catch (e) {
+                        return String(cat).replace(/["\[\]]+/g, '').split(/[,;]+/).map((c) => c.toLowerCase().trim()).filter(Boolean);
+                    }
+                    return [];
+                };
+                if (flowerTypesParam) {
+                    const types = flowerTypesParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean);
+                    if (types.length) {
+                        const before = filteredProducts.length;
+                        filteredProducts = filteredProducts.filter(prod => {
+                            const cats = parseCategoryToArray(prod.category);
+                            const nc = cats.join(' ');
+                            const sub = prod.subcategory ? String(prod.subcategory).toLowerCase() : '';
+                            const name = prod.name ? String(prod.name).toLowerCase() : '';
+                            return types.some(t => nc.includes(t) || sub.includes(t) || name.includes(t));
+                        });
+                        console.log(`Products API: flowerTypes filter (${types.join(',')}) reduced ${before} -> ${filteredProducts.length}`);
+                    }
+                }
+                if (arrangementsParam) {
+                    const arrs = arrangementsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean);
+                    if (arrs.length) {
+                        const before = filteredProducts.length;
+                        filteredProducts = filteredProducts.filter(prod => {
+                            const cats = parseCategoryToArray(prod.category);
+                            const nc = cats.join(' ');
+                            const sub = prod.subcategory ? String(prod.subcategory).toLowerCase() : '';
+                            const name = prod.name ? String(prod.name).toLowerCase() : '';
+                            return arrs.some(a => nc.includes(a) || sub.includes(a) || name.includes(a));
+                        });
+                        console.log(`Products API: arrangements filter (${arrs.join(',')}) reduced ${before} -> ${filteredProducts.length}`);
+                    }
+                }
+                if (colorsParam) {
+                    const cols = colorsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean);
+                    if (cols.length) {
+                        const before = filteredProducts.length;
+                        filteredProducts = filteredProducts.filter(prod => {
+                            const color = prod.colour ? String(prod.colour).toLowerCase().trim() : '';
+                            return cols.includes(color);
+                        });
+                        console.log(`Products API: colors filter (${cols.join(',')}) reduced ${before} -> ${filteredProducts.length}`);
+                    }
+                }
+                // If no products matched the strict category/subcategory search but the client
+                // requested multi-filters (flowerTypes/arrangements/colors), provide a graceful
+                // fallback: search across all products for any of the requested tokens (union).
+                // This avoids empty result pages when categories are stored in an unexpected
+                // format while preserving the regular behavior when the initial search returns hits.
+                if (filteredProducts.length === 0 && (flowerTypesParam || arrangementsParam || colorsParam)) {
+                    try {
+                        const allProducts = normalizeProductsStockStatus(await storage.getAllProducts());
+                        const types = flowerTypesParam ? flowerTypesParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean) : [];
+                        const arrs = arrangementsParam ? arrangementsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean) : [];
+                        const cols = colorsParam ? colorsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean) : [];
+                        const fallback = allProducts.filter(prod => {
+                            const cats = parseCategoryToArray(prod.category).join(' ');
+                            const sub = prod.subcategory ? String(prod.subcategory).toLowerCase() : '';
+                            const name = prod.name ? String(prod.name).toLowerCase() : '';
+                            const color = prod.colour ? String(prod.colour).toLowerCase().trim() : '';
+                            const matchType = types.length ? types.some(t => cats.includes(t) || sub.includes(t) || name.includes(t)) : false;
+                            const matchArr = arrs.length ? arrs.some(a => cats.includes(a) || sub.includes(a) || name.includes(a)) : false;
+                            const matchCol = cols.length ? cols.includes(color) : false;
+                            return matchType || matchArr || matchCol;
+                        });
+                        console.log(`Products API: Fallback union search returned ${fallback.length} products for requested tokens`);
+                        res.set('Cache-Control', 'no-store');
+                        return res.status(200).json(fallback);
+                    }
+                    catch (e) {
+                        console.error('Products API: Fallback union search failed', e);
+                        // proceed to return the empty filteredProducts below
+                    }
+                }
                 console.log(`Products API: Found ${filteredProducts.length} products for category="${category}" subcategory="${subcategory}" search="${search}"`);
                 res.set('Cache-Control', 'no-store');
                 return res.status(200).json(filteredProducts);
             }
             // Otherwise get all products
             let products = await storage.getAllProducts();
+            // Normalize stock status for all products
+            products = normalizeProductsStockStatus(products);
             // Apply best seller filter if specified
             if (req.query.bestSeller === 'true') {
                 products = products.filter(product => product.isbestseller);
@@ -721,7 +837,9 @@ export async function registerRoutes(app) {
     app.get("/api/products/featured", async (req, res) => {
         try {
             const products = await storage.getFeaturedProducts();
-            res.json(products);
+            // Normalize stock status for featured products
+            const normalizedProducts = normalizeProductsStockStatus(products);
+            res.json(normalizedProducts);
         }
         catch (error) {
             res.status(500).json({ message: "Failed to fetch featured products" });
@@ -733,10 +851,41 @@ export async function registerRoutes(app) {
             if (!product) {
                 return res.status(404).json({ message: "Product not found" });
             }
-            res.json(product);
+            // Normalize stock status for single product
+            const normalizedProduct = normalizeProductStockStatus(product);
+            res.json(normalizedProduct);
         }
         catch (error) {
             res.status(500).json({ message: "Failed to fetch product" });
+        }
+    });
+    // Stock status endpoint for debugging and monitoring
+    app.get("/api/products-stock-status", async (req, res) => {
+        try {
+            const products = await storage.getAllProducts();
+            // Normalize stock status and extract relevant information
+            const normalizedProducts = normalizeProductsStockStatus(products);
+            const stockStatus = normalizedProducts.map(product => ({
+                id: product.id,
+                name: product.name,
+                stockQuantity: product.stockQuantity,
+                inStock: product.inStock,
+                isActive: product.isActive || product.isactive || true
+            }));
+            const outOfStock = stockStatus.filter(p => !p.inStock);
+            const lowStock = stockStatus.filter(p => p.inStock && p.stockQuantity <= 5);
+            res.json({
+                totalProducts: stockStatus.length,
+                outOfStock: outOfStock.length,
+                lowStock: lowStock.length,
+                outOfStockProducts: outOfStock,
+                lowStockProducts: lowStock,
+                allProducts: stockStatus
+            });
+        }
+        catch (error) {
+            console.error("Error fetching stock status:", error);
+            res.status(500).json({ message: "Failed to fetch stock status" });
         }
     });
     app.get("/api/getDashboardData", async (req, res) => {
@@ -781,12 +930,168 @@ export async function registerRoutes(app) {
         }
     });
     // Custom requests API
-    // routes.ts
     app.post('/api/admin/custom-requests', async (req, res) => {
         try {
             const { images, comment, product_id, user_name, user_email, user_phone } = req.body;
             console.log('Received custom request:', { images, comment, product_id, user_name, user_email, user_phone });
             const result = await storage.createCustomRequest(images, comment, product_id, user_name, user_email, user_phone);
+            // Send confirmation emails to both user and admin
+            try {
+                // Email to User - Custom Request Confirmation
+                const userEmailContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Custom Request Received - Flower School Bengaluru</title>
+        </head>
+        <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: Arial, sans-serif;">
+          <div style="max-width: 600px; margin: 30px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 16px rgba(15,23,42,0.06);">
+            <div style="padding: 28px 32px; text-align: center; background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);">
+              <h1 style="margin: 0; color: #0f172a; font-size: 22px;">🌸 Custom Request Received</h1>
+              <p style="margin: 8px 0 0 0; color: #334155; font-size: 13px;">Flower School Bengaluru</p>
+            </div>
+
+            <div style="padding: 20px 32px;">
+              <div style="background-color:#f0fdf4; border: 1px solid #bbf7d0; padding: 16px; border-radius: 6px; margin-bottom: 18px;">
+                <strong style="display:block; font-size:16px; color:#065f46;">✅ Request Successfully Submitted</strong>
+                <p style="margin:6px 0 0 0; color:#065f46; font-size:14px;">Thank you! Your customization request has been received. Our team will review your requirements and call you back within 24 hours with a personalized quote.</p>
+              </div>
+
+              <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">📋 Request Details</h3>
+              <div style="background-color: #f8fafc; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 18px;">
+                <p style="margin: 0 0 8px 0;"><strong>Name:</strong> ${user_name || 'Not provided'}</p>
+                <p style="margin: 0 0 8px 0;"><strong>Email:</strong> ${user_email || 'Not provided'}</p>
+                <p style="margin: 0 0 8px 0;"><strong>Phone:</strong> ${user_phone || 'Not provided'}</p>
+                <p style="margin: 0 0 8px 0;"><strong>Product ID:</strong> ${product_id || 'Not specified'}</p>
+                <p style="margin: 0 0 8px 0;"><strong>Request ID:</strong> ${result.id}</p>
+                <p style="margin: 0;"><strong>Custom Requirements:</strong> ${comment || 'No specific requirements mentioned'}</p>
+              </div>
+
+              <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">🌟 What's Next?</h3>
+              <div style="background:#f0f9ff; padding: 14px; border-radius:6px; border:1px solid #bae6fd; margin-bottom:18px;">
+                <ul style="margin:0; padding-left:18px; color:#334155; line-height:1.6;">
+                  <li>Our design team will review your custom requirements</li>
+                  <li>We'll contact you within 24 hours to discuss details</li>
+                  <li>You'll receive a personalized quote and design concepts</li>
+                  <li>Upon approval, we'll create your custom floral arrangement</li>
+                </ul>
+              </div>
+
+              <div style="text-align:center; margin-top: 20px;">
+                <p style="margin:0 0 6px 0; color:#475569; font-size:13px;">Need immediate assistance?</p>
+                <p style="margin:0; font-weight:600; color:#0f172a;">📧 info@flowerschoolbengaluru.com | 📞 +91 99728 03847</p>
+              </div>
+            </div>
+
+            <div style="background:#f8fafc; padding:12px 20px; text-align:center; font-size:12px; color:#6b7280;">
+              <div>Thank you for choosing Flower School Bengaluru 🌸</div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+                // Email to Admin - New Custom Request Notification
+                const adminEmailContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>New Custom Request - Flower School Bengaluru</title>
+        </head>
+        <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: Arial, sans-serif;">
+          <div style="max-width: 600px; margin: 30px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 16px rgba(15,23,42,0.06);">
+            <div style="padding: 28px 32px; text-align: center; background: linear-gradient(90deg, #fee2e2 0%, #fca5a5 100%);">
+              <h1 style="margin: 0; color: #0f172a; font-size: 22px;">🎨 New Custom Request</h1>
+              <p style="margin: 8px 0 0 0; color: #334155; font-size: 13px;">Flower School Bengaluru Admin Panel</p>
+            </div>
+
+            <div style="padding: 20px 32px;">
+              <div style="background-color:#fef2f2; border: 1px solid #fecaca; padding: 16px; border-radius: 6px; margin-bottom: 18px;">
+                <strong style="display:block; font-size:16px; color:#dc2626;">⚠️ Action Required</strong>
+                <p style="margin:6px 0 0 0; color:#dc2626; font-size:14px;">A new custom product request has been received. Please review and contact the customer within 24 hours.</p>
+              </div>
+
+              <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">👤 Customer Details</h3>
+              <div style="background-color: #f8fafc; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 18px;">
+                <p style="margin: 0 0 8px 0;"><strong>Name:</strong> ${user_name || 'Not provided'}</p>
+                <p style="margin: 0 0 8px 0;"><strong>Email:</strong> ${user_email || 'Not provided'}</p>
+                <p style="margin: 0 0 8px 0;"><strong>Phone:</strong> ${user_phone || 'Not provided'}</p>
+                <p style="margin: 0 0 8px 0;"><strong>Product ID:</strong> ${product_id || 'Not specified'}</p>
+                <p style="margin: 0 0 8px 0;"><strong>Request ID:</strong> ${result.id}</p>
+                <p style="margin: 0;"><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+              </div>
+
+              <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">📝 Custom Requirements</h3>
+              <div style="background-color: #f8fafc; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 18px;">
+                <p style="margin: 0; color:#334155; line-height:1.6;">${comment || 'No specific requirements mentioned'}</p>
+              </div>
+
+              ${images ? `
+              <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">📸 Reference Images</h3>
+              <div style="background-color: #f8fafc; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 18px;">
+                <p style="margin: 0; color:#334155;">Customer has uploaded reference images. Please check the admin panel for image details.</p>
+              </div>
+              ` : ''}
+
+              <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">📋 Action Items</h3>
+              <div style="background:#fff7ed; padding: 14px; border-radius:6px; border:1px solid #fed7aa; margin-bottom:18px;">
+                <ul style="margin:0; padding-left:18px; color:#334155; line-height:1.6;">
+                  <li>Review customer requirements and reference images</li>
+                  <li>Contact customer within 24 hours via phone or email</li>
+                  <li>Prepare custom design concepts and pricing</li>
+                  <li>Send personalized quote and design options</li>
+                  <li>Update request status in admin panel</li>
+                </ul>
+              </div>
+
+              <div style="text-align:center; margin-top: 20px; padding: 16px; background-color: #f1f5f9; border-radius: 6px;">
+                <p style="margin:0; font-size:14px; color:#475569;">
+                  <strong>Contact Customer:</strong><br>
+                  📞 ${user_phone || 'Not provided'}<br>
+                  📧 ${user_email || 'Not provided'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+                // Send email to user (if email provided)
+                console.log('[CUSTOM REQUEST EMAIL] Attempting to send user email to:', user_email);
+                console.log('[CUSTOM REQUEST EMAIL] SendGrid API Key configured:', config.sendgrid.apiKey ? 'Yes (length: ' + config.sendgrid.apiKey.length + ')' : 'No');
+                if (user_email) {
+                    const userEmailResult = await sgMail.send({
+                        to: user_email,
+                        from: {
+                            email: 'info@flowerschoolbengaluru.com',
+                            name: 'Flower School Bengaluru'
+                        },
+                        subject: '🌸 Custom Request Received - We\'ll Be In Touch Soon!',
+                        html: userEmailContent
+                    });
+                    console.log('[CUSTOM REQUEST EMAIL] User email sent successfully:', userEmailResult[0].statusCode);
+                }
+                // Send email to admin
+                console.log('[CUSTOM REQUEST EMAIL] Attempting to send admin emails to:', config.admin.emails);
+                for (const adminEmail of config.admin.emails) {
+                    const adminEmailResult = await sgMail.send({
+                        to: adminEmail,
+                        from: {
+                            email: 'info@flowerschoolbengaluru.com',
+                            name: 'Flower School Bengaluru'
+                        },
+                        subject: '🎨 New Custom Request - Action Required',
+                        html: adminEmailContent
+                    });
+                    console.log('[CUSTOM REQUEST EMAIL] Admin email sent successfully to', adminEmail, ':', adminEmailResult[0].statusCode);
+                }
+                console.log('[CUSTOM REQUEST EMAIL] Custom request confirmation emails sent to user and admin:', result.id);
+            }
+            catch (emailError) {
+                console.error('Error sending custom request emails:', emailError);
+                // Don't fail the request if email fails
+            }
             res.status(201).json(result);
         }
         catch (err) {
@@ -823,9 +1128,10 @@ export async function registerRoutes(app) {
             };
             const result = await storage.createPayLaterRequest(payLaterData);
             console.log('Pay later request created:', result.id);
-            // Send course details email (no payment required)
+            // Send confirmation emails to both user and admin
             try {
-                const courseDetailsEmail = `
+                // Email to User - Course Details and Confirmation
+                const userEmail = `
           <!DOCTYPE html>
           <html>
           <head>
@@ -836,7 +1142,7 @@ export async function registerRoutes(app) {
           <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #1f2937;">
             <div style="max-width: 700px; margin: 30px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 16px rgba(15,23,42,0.06);">
               <div style="padding: 28px 32px; text-align: center; background: linear-gradient(90deg, #e6fffa 0%, #ebf8ff 100%);">
-                <h1 style="margin: 0; color: #0f172a; font-size: 22px;">Flower School Bengaluru</h1>
+                <h1 style="margin: 0; color: #0f172a; font-size: 22px;">🌸 Flower School Bengaluru</h1>
                 <p style="margin: 8px 0 0 0; color: #334155; font-size: 13px;">Course Details & Information</p>
               </div>
 
@@ -867,7 +1173,7 @@ export async function registerRoutes(app) {
 
                 <div style="text-align:center; margin-top: 10px;">
                   <p style="margin:0 0 6px 0; color:#475569; font-size:13px;">Need immediate help?</p>
-                  <p style="margin:0; font-weight:600; color:#0f172a;">📧 <a href="mailto:info@flowerschoolbengaluru.com" style="color:#0f172a; text-decoration:none;">info@flowerschoolbengaluru.com</a> | 📞 +91 99728 03847</p>
+                  <p style="margin:0; font-weight:600; color:#0f172a;">📧 info@flowerschoolbengaluru.com | 📞 +91 99728 03847</p>
                 </div>
               </div>
 
@@ -878,20 +1184,93 @@ export async function registerRoutes(app) {
           </body>
           </html>
         `;
-                const msg = {
+                // Email to Admin - New Pay Later Request Notification
+                const adminEmail = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>New Pay Later Request - Flower School Bengaluru</title>
+          </head>
+          <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: Arial, sans-serif;">
+            <div style="max-width: 600px; margin: 30px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 16px rgba(15,23,42,0.06);">
+              <div style="padding: 28px 32px; text-align: center; background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);">
+                <h1 style="margin: 0; color: #0f172a; font-size: 22px;">🔔 New Pay Later Request</h1>
+                <p style="margin: 8px 0 0 0; color: #334155; font-size: 13px;">Flower School Bengaluru Admin Panel</p>
+              </div>
+
+              <div style="padding: 20px 32px;">
+                <div style="background-color:#fef2f2; border: 1px solid #fecaca; padding: 16px; border-radius: 6px; margin-bottom: 18px;">
+                  <strong style="display:block; font-size:16px; color:#dc2626;">⚠️ Action Required</strong>
+                  <p style="margin:6px 0 0 0; color:#dc2626; font-size:14px;">A new pay later request has been received. Please contact the student within 24-48 hours.</p>
+                </div>
+
+                <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">👤 Student Details</h3>
+                <div style="background-color: #f8fafc; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 18px;">
+                  <p style="margin: 0 0 8px 0;"><strong>Name:</strong> ${payLaterData.full_name}</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Email:</strong> ${payLaterData.email_address}</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Phone:</strong> ${payLaterData.phone_number}</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Course/Workshop:</strong> ${payLaterData.courses_or_workshops}</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Payment Method:</strong> Pay Later</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Request ID:</strong> ${result.id}</p>
+                  <p style="margin: 0 0 8px 0;"><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+                  ${payLaterData.questions_or_comments ? `<p style="margin: 0;"><strong>Questions/Comments:</strong> ${payLaterData.questions_or_comments}</p>` : ''}
+                </div>
+
+                <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">📋 Next Steps</h3>
+                <div style="background:#f0f9ff; padding: 14px; border-radius:6px; border:1px solid #bae6fd; margin-bottom:18px;">
+                  <ul style="margin:0; padding-left:18px; color:#334155; line-height:1.6;">
+                    <li>Contact the student within 24-48 hours</li>
+                    <li>Discuss course details, schedule, and payment arrangements</li>
+                    <li>Send course materials and joining instructions</li>
+                    <li>Update the request status in admin panel</li>
+                  </ul>
+                </div>
+
+                <div style="text-align:center; margin-top: 20px; padding: 16px; background-color: #f1f5f9; border-radius: 6px;">
+                  <p style="margin:0; font-size:14px; color:#475569;">
+                    <strong>Contact Student:</strong><br>
+                    📞 ${payLaterData.phone_number}<br>
+                    📧 ${payLaterData.email_address}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
+                // Send email to user
+                console.log('[PAY LATER EMAIL] Attempting to send user email to:', payLaterData.email_address);
+                console.log('[PAY LATER EMAIL] SendGrid API Key configured:', config.sendgrid.apiKey ? 'Yes (length: ' + config.sendgrid.apiKey.length + ')' : 'No');
+                console.log('[PAY LATER EMAIL] From email:', 'info@flowerschoolbengaluru.com');
+                const userEmailResult = await sgMail.send({
                     to: payLaterData.email_address,
                     from: {
                         email: 'info@flowerschoolbengaluru.com',
                         name: 'Flower School Bengaluru'
                     },
                     subject: '📚 Course Details - Flower School Bengaluru',
-                    html: courseDetailsEmail
-                };
-                await sgMail.send(msg);
-                console.log('Course details email sent to:', payLaterData.email_address);
+                    html: userEmail
+                });
+                console.log('[PAY LATER EMAIL] User email sent successfully:', userEmailResult[0].statusCode);
+                // Send email to admin
+                console.log('[PAY LATER EMAIL] Attempting to send admin emails to:', config.admin.emails);
+                for (const adminEmailAddress of config.admin.emails) {
+                    const adminEmailResult = await sgMail.send({
+                        to: adminEmailAddress,
+                        from: {
+                            email: 'info@flowerschoolbengaluru.com',
+                            name: 'Flower School Bengaluru'
+                        },
+                        subject: '🔔 New Pay Later Request - Action Required',
+                        html: adminEmail
+                    });
+                    console.log('[PAY LATER EMAIL] Admin email sent successfully to', adminEmailAddress, ':', adminEmailResult[0].statusCode);
+                }
+                console.log('[PAY LATER EMAIL] Confirmation emails sent to user and admin for pay later request:', result.id);
             }
             catch (emailError) {
-                console.error('Error sending course details email:', emailError);
+                console.error('Error sending confirmation emails:', emailError);
                 // Don't fail the request if email fails
             }
             res.status(201).json({
@@ -1142,7 +1521,11 @@ export async function registerRoutes(app) {
     // Enhanced Payment Create Order - For immediate course payments with email notifications
     app.post("/api/payment/create-order", async (req, res) => {
         try {
-            const { amount, currency = 'INR', receipt, notes, courseDetails // New field for course information
+            const { amount, currency = 'INR', receipt, notes, courseDetails, // Course information
+            orderDetails, // Product order information
+            paymentMethod, // Payment method details (GPay, UPI, etc.)
+            deliveryAddress, // User delivery address
+            orderItems // Product items in the order
              } = req.body;
             // Validate required fields
             if (!amount || amount <= 0) {
@@ -1158,83 +1541,247 @@ export async function registerRoutes(app) {
                 notes: notes || {}
             });
             console.log('Razorpay order created:', razorpayOrder.id);
-            // If course details are provided, send payment initiated email
-            if (courseDetails) {
+            // If order details are provided (either course or product), send confirmation emails
+            if (courseDetails || orderDetails) {
                 try {
-                    const emailService = {
-                        async sendCoursePaymentInitiatedEmail(orderData, courseData) {
-                            const htmlContent = `
-                <!DOCTYPE html>
-                <html>
-                <head>
-                  <meta charset="utf-8">
-                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                  <title>Course Payment - Order Created</title>
-                </head>
-                <body style="margin: 0; padding: 0; background-color: #f7f7f7; font-family: Arial, sans-serif;">
-                  <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 40px 20px;">
-                    <div style="text-align: center; margin-bottom: 30px;">
-                      <h1 style="color: #2d3748; margin: 0; font-size: 28px;">Flower School Bengaluru</h1>
-                      <p style="color: #666; margin: 5px 0 0 0;">Course Payment Order</p>
-                    </div>
-                    
-                    <div style="background-color: #fef5e7; border-left: 4px solid #f6ad55; padding: 20px; margin-bottom: 30px;">
-                      <h2 style="color: #2d3748; margin: 0 0 10px 0; font-size: 24px;">⏳ Payment Order Created</h2>
-                      <p style="color: #2d3748; margin: 0; font-size: 16px;">
-                        Your payment order has been created. Please complete the payment to confirm your enrollment.
-                      </p>
-                    </div>
+                    // Determine if this is a course or product order
+                    const isProductOrder = orderDetails && orderItems;
+                    const customerDetails = courseDetails || orderDetails;
+                    // Email to User - Payment Order Created
+                    const userEmailContent = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>${isProductOrder ? 'Product Order' : 'Course Payment'} - Order Created</title>
+            </head>
+            <body style="margin: 0; padding: 0; background-color: #f7f7f7; font-family: Arial, sans-serif;">
+              <div style="max-width: 600px; margin: 0 auto; background-color: white; padding: 40px 20px;">
+                <div style="text-align: center; margin-bottom: 30px;">
+                  <h1 style="color: #2d3748; margin: 0; font-size: 28px;">🌸 Flower School Bengaluru</h1>
+                  <p style="color: #666; margin: 5px 0 0 0;">${isProductOrder ? 'Product Order' : 'Course Payment'} Confirmation</p>
+                </div>
+                
+                <div style="background-color: #fef5e7; border-left: 4px solid #f6ad55; padding: 20px; margin-bottom: 30px;">
+                  <h2 style="color: #2d3748; margin: 0 0 10px 0; font-size: 24px;">⏳ Payment Order Created</h2>
+                  <p style="color: #2d3748; margin: 0; font-size: 16px;">
+                    Your payment order has been created. Please complete the payment to confirm your ${isProductOrder ? 'order' : 'enrollment'}.
+                  </p>
+                </div>
 
-                    <div style="margin-bottom: 30px;">
-                      <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">💰 Payment Details</h3>
-                      <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
-                        <p style="margin: 0 0 10px 0;"><strong>Order ID:</strong> ${orderData.id}</p>
-                        <p style="margin: 0 0 10px 0;"><strong>Amount:</strong> ₹${(orderData.amount / 100).toLocaleString()}</p>
-                        <p style="margin: 0 0 10px 0;"><strong>Currency:</strong> ${orderData.currency}</p>
-                        <p style="margin: 0;"><strong>Receipt:</strong> ${orderData.receipt}</p>
-                      </div>
-                    </div>
-
-                    <div style="margin-bottom: 30px;">
-                      <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">📚 Course Details</h3>
-                      <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
-                        <p style="margin: 0 0 10px 0;"><strong>Student Name:</strong> ${courseData.full_name}</p>
-                        <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${courseData.email_address}</p>
-                        <p style="margin: 0 0 10px 0;"><strong>Phone:</strong> ${courseData.phone_number}</p>
-                        <p style="margin: 0 0 10px 0;"><strong>Course/Workshop:</strong> ${courseData.courses_or_workshops}</p>
-                        ${courseData.questions_or_comments ? `<p style="margin: 0;"><strong>Comments:</strong> ${courseData.questions_or_comments}</p>` : ''}
-                      </div>
-                    </div>
-
-                    <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e2e8f0;">
-                      <p style="color: #666; margin: 0 0 10px 0; font-size: 14px;">
-                        Complete your payment to confirm enrollment. Need help?
-                      </p>
-                      <p style="color: #2d3748; margin: 0; font-weight: 600;">
-                        📧 info@flowerschoolbengaluru.com | 📞 +91 99728 03847
-                      </p>
-                    </div>
+                <div style="margin-bottom: 30px;">
+                  <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">💰 Payment Details</h3>
+                  <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
+                    <p style="margin: 0 0 10px 0;"><strong>Order ID:</strong> ${razorpayOrder.id}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>Amount:</strong> ₹${(Number(razorpayOrder.amount) / 100).toLocaleString()}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>Currency:</strong> ${razorpayOrder.currency}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>Receipt:</strong> ${razorpayOrder.receipt}</p>
+                    <p style="margin: 0;"><strong>Payment Method:</strong> ${paymentMethod || 'Online Payment (Razorpay)'}</p>
                   </div>
-                </body>
-                </html>
-              `;
-                            const msg = {
-                                to: courseData.email_address,
-                                from: {
-                                    email: 'info@flowerschoolbengaluru.com',
-                                    name: 'Flower School Bengaluru'
-                                },
-                                subject: '⏳ Course Payment Order Created - Complete Your Payment',
-                                html: htmlContent
-                            };
-                            await sgMail.send(msg);
-                            console.log('Payment initiated email sent to:', courseData.email_address);
-                        }
-                    };
-                    await emailService.sendCoursePaymentInitiatedEmail(razorpayOrder, courseDetails);
+                </div>
+
+                ${isProductOrder && orderItems ? `
+                <div style="margin-bottom: 30px;">
+                  <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">�️ Order Items</h3>
+                  <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
+                    ${orderItems.map(item => `
+                      <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 10px;">
+                        <p style="margin: 0 0 5px 0;"><strong>${item.name || item.productName || 'Product'}</strong></p>
+                        ${item.image ? `<div style="margin-bottom: 8px;"><img src="${item.image}" alt="${item.name || item.productName || 'Product'}" style="width: 100px; height: 100px; object-fit: cover; border-radius: 6px; border: 1px solid #e2e8f0;"></div>` : ''}
+                        <p style="margin: 0 0 5px 0; color: #666; font-size: 14px;">
+                          Quantity: ${item.quantity || 1} × ₹${item.price ? Number(item.price).toLocaleString() : (item.unitPrice ? Number(item.unitPrice).toLocaleString() : 'N/A')}
+                        </p>
+                        ${item.description ? `<p style="margin: 5px 0 5px 0; color: #666; font-size: 13px;">${item.description}</p>` : ''}
+                        ${item.color ? `<p style="margin: 5px 0 5px 0; color: #666; font-size: 13px;"><strong>Color:</strong> ${item.color}</p>` : ''}
+                        <p style="margin: 8px 0 0 0; font-weight: bold; color: #2d3748;">
+                          Total: ₹${item.totalPrice ? Number(item.totalPrice).toLocaleString() : ((item.price || item.unitPrice || 0) * (item.quantity || 1)).toLocaleString()}
+                        </p>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+                ` : ''}
+
+                ${deliveryAddress || customerDetails ? `
+                <div style="margin-bottom: 30px;">
+                  <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">👤 Customer Details</h3>
+                  <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
+                    <p style="margin: 0 0 10px 0;"><strong>Name:</strong> ${deliveryAddress?.name || deliveryAddress?.fullName || customerDetails?.full_name || customerDetails?.name || 'N/A'}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${deliveryAddress?.email || customerDetails?.email_address || customerDetails?.email || 'N/A'}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>Phone:</strong> ${deliveryAddress?.phone || customerDetails?.phone_number || customerDetails?.phone || 'N/A'}</p>
+                    ${deliveryAddress?.address || deliveryAddress?.addressLine1 ? `
+                      <p style="margin: 0 0 5px 0;"><strong>Address:</strong></p>
+                      <p style="margin: 0 0 10px 0; color: #666; font-size: 14px; padding-left: 10px;">
+                        ${deliveryAddress.address || [
+                        deliveryAddress.addressLine1,
+                        deliveryAddress.addressLine2,
+                        deliveryAddress.landmark,
+                        deliveryAddress.city,
+                        deliveryAddress.state,
+                        deliveryAddress.postalCode || deliveryAddress.pincode,
+                        deliveryAddress.country
+                    ].filter(Boolean).join(', ')}
+                      </p>
+                    ` : ''}
+                  </div>
+                </div>
+                ` : ''}
+
+                ${!isProductOrder ? `
+                <div style="margin-bottom: 30px;">
+                  <h3 style="color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">�📚 Course Details</h3>
+                  <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px;">
+                    <p style="margin: 0 0 10px 0;"><strong>Student Name:</strong> ${customerDetails.full_name || 'N/A'}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${customerDetails.email_address || 'N/A'}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>Phone:</strong> ${customerDetails.phone_number || 'N/A'}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>Course/Workshop:</strong> ${customerDetails.courses_or_workshops || 'N/A'}</p>
+                    ${customerDetails.questions_or_comments ? `<p style="margin: 0;"><strong>Comments:</strong> ${customerDetails.questions_or_comments}</p>` : ''}
+                  </div>
+                </div>
+                ` : ''}
+
+                <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e2e8f0;">
+                  <p style="color: #666; margin: 0 0 10px 0; font-size: 14px;">
+                    Complete your payment to confirm ${isProductOrder ? 'order' : 'enrollment'}. Need help?
+                  </p>
+                  <p style="color: #2d3748; margin: 0; font-weight: 600;">
+                    📧 info@flowerschoolbengaluru.com | 📞 +91 99728 03847
+                  </p>
+                </div>
+              </div>
+            </body>
+            </html>
+          `;
+                    // Email to Admin - New Payment Order Notification
+                    const adminEmailContent = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <title>New Payment Order Created - Flower School Bengaluru</title>
+            </head>
+            <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: Arial, sans-serif;">
+              <div style="max-width: 600px; margin: 30px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 16px rgba(15,23,42,0.06);">
+                <div style="padding: 28px 32px; text-align: center; background: linear-gradient(90deg, #e0f2fe 0%, #bae6fd 100%);">
+                  <h1 style="margin: 0; color: #0f172a; font-size: 22px;">💳 New ${isProductOrder ? 'Product Order' : 'Course Payment'}</h1>
+                  <p style="margin: 8px 0 0 0; color: #334155; font-size: 13px;">Flower School Bengaluru Admin Panel</p>
+                </div>
+
+                <div style="padding: 20px 32px;">
+                  <div style="background-color:#eff6ff; border: 1px solid #bfdbfe; padding: 16px; border-radius: 6px; margin-bottom: 18px;">
+                    <strong style="display:block; font-size:16px; color:#1e40af;">📊 Payment Order Created</strong>
+                    <p style="margin:6px 0 0 0; color:#1e40af; font-size:14px;">A new payment order has been created. Customer is proceeding with immediate payment.</p>
+                  </div>
+
+                  <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">💰 Payment Details</h3>
+                  <div style="background-color: #f8fafc; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 18px;">
+                    <p style="margin: 0 0 8px 0;"><strong>Order ID:</strong> ${razorpayOrder.id}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Amount:</strong> ₹${(Number(razorpayOrder.amount) / 100).toLocaleString()}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Currency:</strong> ${razorpayOrder.currency}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Receipt:</strong> ${razorpayOrder.receipt}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Payment Method:</strong> ${paymentMethod || 'Razorpay Gateway'}</p>
+                    <p style="margin: 0;"><strong>Created:</strong> ${new Date().toLocaleString()}</p>
+                  </div>
+
+                  ${isProductOrder && orderItems ? `
+                  <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">�️ Order Items</h3>
+                  <div style="background-color: #f8fafc; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 18px;">
+                    ${orderItems.map(item => `
+                      <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 8px;">
+                        <p style="margin: 0 0 4px 0;"><strong>${item.name || 'Product'}</strong></p>
+                        <p style="margin: 0; color: #666; font-size: 13px;">
+                          Qty: ${item.quantity || 1} | Price: ₹${item.price ? Number(item.price).toLocaleString() : 'N/A'}
+                        </p>
+                        ${item.description ? `<p style="margin: 4px 0 0 0; color: #666; font-size: 12px;">${item.description}</p>` : ''}
+                      </div>
+                    `).join('')}
+                  </div>
+                  ` : ''}
+
+                  ${deliveryAddress ? `
+                  <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">🏠 Delivery Address</h3>
+                  <div style="background-color: #f8fafc; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 18px;">
+                    <p style="margin: 0 0 8px 0;"><strong>Name:</strong> ${deliveryAddress.name || customerDetails.full_name || 'N/A'}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Phone:</strong> ${deliveryAddress.phone || customerDetails.phone_number || 'N/A'}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Address:</strong> ${deliveryAddress.address || 'N/A'}</p>
+                    ${deliveryAddress.city ? `<p style="margin: 0 0 8px 0;"><strong>City:</strong> ${deliveryAddress.city}</p>` : ''}
+                    ${deliveryAddress.state ? `<p style="margin: 0 0 8px 0;"><strong>State:</strong> ${deliveryAddress.state}</p>` : ''}
+                    ${deliveryAddress.pincode ? `<p style="margin: 0;"><strong>PIN:</strong> ${deliveryAddress.pincode}</p>` : ''}
+                  </div>
+                  ` : ''}
+
+                  <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">�👤 ${isProductOrder ? 'Customer' : 'Student'} Details</h3>
+                  <div style="background-color: #f8fafc; padding: 14px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 18px;">
+                    <p style="margin: 0 0 8px 0;"><strong>Name:</strong> ${customerDetails.full_name || 'N/A'}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Email:</strong> ${customerDetails.email_address || 'N/A'}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Phone:</strong> ${customerDetails.phone_number || 'N/A'}</p>
+                    ${!isProductOrder ? `<p style="margin: 0 0 8px 0;"><strong>Course/Workshop:</strong> ${customerDetails.courses_or_workshops || 'N/A'}</p>` : ''}
+                    ${customerDetails.questions_or_comments ? `<p style="margin: 0;"><strong>Comments:</strong> ${customerDetails.questions_or_comments}</p>` : ''}
+                  </div>
+
+                  <h3 style="margin: 0 0 10px 0; color:#0b1220; font-size:16px;">🎯 Action Items</h3>
+                  <div style="background:#f0f9ff; padding: 14px; border-radius:6px; border:1px solid #bae6fd; margin-bottom:18px;">
+                    <ul style="margin:0; padding-left:18px; color:#334155; line-height:1.6;">
+                      <li>Monitor payment completion status</li>
+                      ${isProductOrder ? `
+                        <li>Prepare products for packaging and dispatch</li>
+                        <li>Update inventory and stock levels</li>
+                        <li>Arrange delivery logistics</li>
+                        <li>Send tracking information after dispatch</li>
+                      ` : `
+                        <li>Prepare course materials and schedule</li>
+                        <li>Send welcome email after payment confirmation</li>
+                        <li>Update enrollment records</li>
+                      `}
+                    </ul>
+                  </div>
+
+                  <div style="text-align:center; margin-top: 20px; padding: 16px; background-color: #f1f5f9; border-radius: 6px;">
+                    <p style="margin:0; font-size:14px; color:#475569;">
+                      <strong>Customer Contact:</strong><br>
+                      📞 ${customerDetails.phone_number || 'N/A'}<br>
+                      📧 ${customerDetails.email_address || 'N/A'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </body>
+            </html>
+          `;
+                    // Send email to user
+                    console.log('[PAYMENT ORDER EMAIL] Attempting to send user email to:', customerDetails.email_address);
+                    console.log('[PAYMENT ORDER EMAIL] SendGrid API Key configured:', config.sendgrid.apiKey ? 'Yes (length: ' + config.sendgrid.apiKey.length + ')' : 'No');
+                    if (customerDetails.email_address) {
+                        const userEmailResult = await sgMail.send({
+                            to: customerDetails.email_address,
+                            from: {
+                                email: 'info@flowerschoolbengaluru.com',
+                                name: 'Flower School Bengaluru'
+                            },
+                            subject: `⏳ ${isProductOrder ? 'Product Order' : 'Course Payment'} Created - Complete Your Payment`,
+                            html: userEmailContent
+                        });
+                        console.log('[PAYMENT ORDER EMAIL] User email sent successfully:', userEmailResult[0].statusCode);
+                    }
+                    // Send email to admin
+                    console.log('[PAYMENT ORDER EMAIL] Attempting to send admin emails to:', config.admin.emails);
+                    for (const adminEmailAddress of config.admin.emails) {
+                        const adminEmailResult = await sgMail.send({
+                            to: adminEmailAddress,
+                            from: {
+                                email: 'info@flowerschoolbengaluru.com',
+                                name: 'Flower School Bengaluru'
+                            },
+                            subject: `💳 New ${isProductOrder ? 'Product Order' : 'Course Payment'} Created - Action Required`,
+                            html: adminEmailContent
+                        });
+                        console.log('[PAYMENT ORDER EMAIL] Admin email sent successfully to', adminEmailAddress, ':', adminEmailResult[0].statusCode);
+                    }
+                    console.log('[PAYMENT ORDER EMAIL] Payment order confirmation emails sent to user and admin:', razorpayOrder.id);
                 }
                 catch (emailError) {
-                    console.error('Error sending payment initiated email:', emailError);
+                    console.error('Error sending payment order emails:', emailError);
                     // Don't fail the order creation if email fails
                 }
             }
@@ -1477,6 +2024,83 @@ export async function registerRoutes(app) {
             });
         }
     });
+    // Direct SendGrid Test Route
+    app.post("/api/sendgrid/test", async (req, res) => {
+        try {
+            const { email } = req.body;
+            if (!email) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Email address is required'
+                });
+            }
+            console.log('[SENDGRID TEST] Testing with API Key:', config.sendgrid.apiKey ? 'Set (length: ' + config.sendgrid.apiKey.length + ')' : 'Not set');
+            console.log('[SENDGRID TEST] From Email:', config.sendgrid.fromEmail);
+            console.log('[SENDGRID TEST] Sending test email to:', email);
+            const testEmailContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>SendGrid Test Email</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+          <h1 style="color: #2d3748;">🧪 SendGrid Test Email</h1>
+          <p>This is a test email from Flower School Bengaluru to verify SendGrid configuration.</p>
+          <p><strong>Sent at:</strong> ${new Date().toISOString()}</p>
+          <p><strong>From:</strong> ${config.sendgrid.fromEmail}</p>
+          <p><strong>API Key Status:</strong> ${config.sendgrid.apiKey ? 'Configured ✅' : 'Not configured ❌'}</p>
+          <p>If you receive this email, SendGrid is working correctly! 🎉</p>
+        </body>
+        </html>
+      `;
+            const msg = {
+                to: email,
+                from: {
+                    email: config.sendgrid.fromEmail,
+                    name: 'Flower School Bengaluru'
+                },
+                subject: '🧪 SendGrid Test Email - Configuration Check',
+                html: testEmailContent
+            };
+            console.log('[SENDGRID TEST] Sending email with message:', JSON.stringify(msg, null, 2));
+            const result = await sgMail.send(msg);
+            console.log('[SENDGRID TEST] Email sent successfully:', result[0].statusCode);
+            res.status(200).json({
+                success: true,
+                message: 'SendGrid test email sent successfully',
+                recipient: email,
+                statusCode: result[0].statusCode,
+                messageId: result[0].headers['x-message-id']
+            });
+        }
+        catch (error) {
+            console.error('[SENDGRID TEST] Error sending email:', error);
+            // Handle SendGrid specific errors
+            if (error instanceof Error) {
+                const sendGridError = error;
+                console.error('[SENDGRID TEST] Error details:', {
+                    message: sendGridError.message,
+                    code: sendGridError.code,
+                    response: sendGridError.response?.body
+                });
+                res.status(500).json({
+                    success: false,
+                    error: 'SendGrid test failed',
+                    message: sendGridError.message,
+                    code: sendGridError.code,
+                    details: sendGridError.response?.body
+                });
+            }
+            else {
+                res.status(500).json({
+                    success: false,
+                    error: 'Unknown error occurred',
+                    details: error
+                });
+            }
+        }
+    });
     // Orders
     app.post("/api/orders", async (req, res) => {
         try {
@@ -1624,9 +2248,13 @@ export async function registerRoutes(app) {
                         total: createdOrder.total?.toString() || '0',
                         estimatedDeliveryDate: createdOrder.estimatedDeliveryDate || new Date(Date.now() + 24 * 60 * 60 * 1000),
                         items: Array.isArray(createdOrder.items) ? createdOrder.items.map(item => ({
-                            name: item.name || 'Product',
+                            name: item.name || item.productName || 'Product',
+                            productName: item.productName || item.name || 'Product',
                             quantity: item.quantity || 1,
-                            price: (item.price || 0).toString()
+                            price: (item.price || item.unitPrice || 0).toString(),
+                            unitPrice: item.unitPrice || item.price || 0,
+                            totalPrice: item.totalPrice || ((item.unitPrice || item.price || 0) * (item.quantity || 1)),
+                            productId: item.productId || ''
                         })) : [],
                         deliveryAddress: createdOrder.deliveryAddress || 'Address not provided',
                         paymentMethod: createdOrder.paymentMethod || 'Not specified',
@@ -1649,22 +2277,42 @@ export async function registerRoutes(app) {
                             customerName: notificationData.customerName
                         });
                         if (createdOrder.email) {
+                            console.log(`[EMAIL] Constructing email data for order ${notificationData.orderNumber}`);
+                            console.log(`[EMAIL] notificationData.items:`, notificationData.items);
                             const emailData = {
                                 orderNumber: notificationData.orderNumber,
                                 customerName: notificationData.customerName,
                                 customerEmail: createdOrder.email,
-                                items: notificationData.items.map(item => ({
-                                    name: item.name,
-                                    quantity: item.quantity,
-                                    price: item.price
-                                })),
+                                customerPhone: createdOrder.phone || '',
+                                items: notificationData.items.map(item => {
+                                    const itemData = item;
+                                    const mappedItem = {
+                                        name: itemData.name || itemData.productName || 'Product',
+                                        productName: itemData.productName || itemData.name,
+                                        description: itemData.description || '',
+                                        quantity: item.quantity,
+                                        price: item.price,
+                                        unitPrice: itemData.unitPrice || item.price,
+                                        totalPrice: itemData.totalPrice || (Number(item.price || 0) * Number(item.quantity || 1)),
+                                        color: itemData.color || '',
+                                        image: itemData.image || ''
+                                    };
+                                    console.log(`[EMAIL] Mapped item:`, mappedItem);
+                                    return mappedItem;
+                                }),
                                 subtotal: orderProcessingResult.calculatedPricing?.subtotal || createdOrder.subtotal || '0',
                                 deliveryCharge: orderProcessingResult.calculatedPricing?.deliveryCharge || createdOrder.deliveryCharge || '0',
                                 discountAmount: orderProcessingResult.calculatedPricing?.discountAmount || createdOrder.discountAmount || '0',
                                 total: orderProcessingResult.calculatedPricing?.total || createdOrder.total || '0',
-                                paymentMethod: notificationData.paymentMethod,
+                                paymentMethod: notificationData.paymentMethod || 'Online Payment',
                                 deliveryAddress: notificationData.deliveryAddress,
-                                estimatedDeliveryDate: notificationData.estimatedDeliveryDate.toISOString()
+                                estimatedDeliveryDate: notificationData.estimatedDeliveryDate.toISOString(),
+                                customerDetails: {
+                                    name: notificationData.customerName,
+                                    email: createdOrder.email,
+                                    phone: createdOrder.phone,
+                                    address: notificationData.deliveryAddress
+                                }
                             };
                             const emailSent = await emailService.sendOrderConfirmationEmail(emailData);
                             if (emailSent) {
