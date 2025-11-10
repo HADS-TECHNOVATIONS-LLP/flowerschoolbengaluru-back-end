@@ -31,6 +31,7 @@
     "express-session": "^1.18.1",
     "multer": "^2.0.2",
     "nanoid": "^5.0.4",
+    "node-fetch": "^3.3.2",
     "razorpay": "^2.9.6",
     "twilio": "^5.9.0",
     "ws": "^8.18.3",
