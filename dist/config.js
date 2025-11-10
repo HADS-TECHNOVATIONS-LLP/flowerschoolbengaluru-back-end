@@ -3,7 +3,7 @@ dotenv.config();
 export const config = {
     nodeEnv: process.env.NODE_ENV || "development",
     database: {
-        url: process.env.DATABASE_URL || "postgres://postgres:2002@localhost:5432/bouquetbar"
+        url: process.env.DATABASE_URL || "postgres://postgres:Vyshnudevi7507@localhost:5432/bouquetbar"
     },
     razorpay: {
         keyId: process.env.RAZORPAY_KEY_ID || "rzp_live_RWo2zsTKLIGYbi",
