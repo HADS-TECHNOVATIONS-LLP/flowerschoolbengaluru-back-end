@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 
-const sql = neon('postgres://postgres:Vyshnudevi7507@localhost:5432/bouquetbar');
+const sql = neon('postgres://postgres:2002@localhost:5432/bouquetbar');
 
 async function checkProducts() {
   try {
