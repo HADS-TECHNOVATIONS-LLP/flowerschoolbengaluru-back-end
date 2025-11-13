@@ -1,6 +1,4 @@
 
-
-
 import express, { type Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage.js";
@@ -660,41 +658,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/signin", async (req, res) => {
     try {
+      console.log('Signin attempt:', { email: req.body?.email, hasPassword: !!req.body?.password });
+      
       const { email, password } = req.body;
       if (!email) {
-      return res.status(400).json({ 
-        status: 'error',
-        message: "Email is required",
-        error: "Missing email address",
-        details: "Please enter your email address to sign in"
-      });
-    }
-    if (!password) {
-      return res.status(400).json({ 
-        status: 'error',
-        message: "Password is required",
-        error: "Missing password",
-        details: "Please enter your password to sign in"
-      });
-    }
+        console.log('Signin failed: No email provided');
+        return res.status(400).json({ 
+          status: 'error',
+          message: "Email is required",
+          error: "Missing email address",
+          details: "Please enter your email address to sign in"
+        });
+      }
+      if (!password) {
+        console.log('Signin failed: No password provided');
+        return res.status(400).json({ 
+          status: 'error',
+          message: "Password is required",
+          error: "Missing password",
+          details: "Please enter your password to sign in"
+        });
+      }
 
       // Find user by email first
+      console.log('Looking up user by email:', email);
       const userByEmail = await storage.getUserByEmailOnly(email);
+      console.log('User lookup result:', userByEmail ? 'User found' : 'User not found');
+      
       if (!userByEmail) {
-        // Email not found — return minimal message for frontend
-        return res.status(401).json({ message: 'Email incorrect' });
+        // Email not found — return specific error for frontend to show create account option
+        console.log('User not found, returning email_not_found error');
+        return res.status(401).json({ 
+          code: 'email_not_found',
+          message: 'Email not registered',
+          error: 'Email incorrect',
+          details: 'This email address is not registered. Please create an account first.'
+        });
       }
 
       // Verify password (storage currently stores plain password)
       // If your storage uses hashing, replace with bcrypt.compare
       const storedPassword = (userByEmail as any).password;
+      console.log('Comparing passwords');
       if (storedPassword !== password) {
-        // Password mismatch — return minimal message for frontend
-        return res.status(401).json({ message: 'Incorrect password' });
+        // Password mismatch — return specific error for password
+        console.log('Password mismatch, returning password_incorrect error');
+        return res.status(401).json({ 
+          code: 'password_incorrect',
+          message: 'Incorrect password',
+          error: 'Incorrect password',
+          details: 'The password you entered is incorrect. Please try again.'
+        });
       }
 
       // At this point email and password match; use this user
       const user = userByEmail;
+      console.log('Authentication successful for user:', user.id);
 
       // Create session
       const sessionToken = generateSessionToken();
@@ -708,15 +727,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
 
-  // Return user without password
-  const { password: _, ...userWithoutPassword } = user as any;
-  // Also include token in the JSON body (duplicate of cookie) so clients
-  // that rely on a stored token (localStorage fallback) can persist it.
-  // This is safe for dev usage; ensure cookies are still the primary auth mechanism.
-  res.json({ status: 'success', user: userWithoutPassword, message: "Signed in successfully", sessionToken, token: sessionToken });
+      // Return user without password
+      const { password: _, ...userWithoutPassword } = user as any;
+      // Also include token in the JSON body (duplicate of cookie) so clients
+      // that rely on a stored token (localStorage fallback) can persist it.
+      // This is safe for dev usage; ensure cookies are still the primary auth mechanism.
+      console.log('Signin successful, sending response');
+      res.json({ status: 'success', user: userWithoutPassword, message: "Signed in successfully", sessionToken, token: sessionToken });
     } catch (error) {
       console.error("Signin error:", error);
-      res.status(500).json({ message: "Failed to sign in" });
+      console.error("Error stack:", error.stack);
+      
+      // Check if it's a database connection/authentication error
+      if (error.message && (
+        error.message.includes('password authentication failed') ||
+        error.message.includes('connect') ||
+        error.message.includes('ECONNREFUSED') ||
+        error.message.includes('database')
+      )) {
+        console.log('Database connection error detected');
+        return res.status(503).json({ 
+          message: "Database connection error. Please try again later.",
+          code: 'db_connection_error'
+        });
+      }
+      
+      // Check if it's a user lookup error that might indicate user doesn't exist
+      if (error.message && error.message.includes('Failed to get user by email')) {
+        console.log('User lookup error - treating as user not found');
+        return res.status(401).json({ 
+          code: 'email_not_found',
+          message: 'Email not registered',
+          error: 'Email incorrect',
+          details: 'This email address is not registered. Please create an account first.'
+        });
+      }
+      
+      res.status(500).json({ 
+        message: "Failed to sign in",
+        code: 'internal_server_error',
+        details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      });
     }
   });
 
@@ -1195,7 +1246,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { category } = req.params;
       console.log(`[MAIN_CATEGORY API] Getting products for category: "${category}"`);
 
-      // SQL query to get products by main category with subcategory information
+      
       const query = `
         SELECT id, name, main_category, subcategory, price, image
         FROM bouquetbar.products
@@ -6528,14 +6579,30 @@ app.get("/api/categoryuserdata", async (req, res) => {
 
 
   // Health check endpoint for monitoring and load balancers
-  app.get("/health", (req, res) => {
-    res.status(200).json({
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      environment: process.env.NODE_ENV || "development",
-      version: process.env.npm_package_version || "1.0.0"
-    });
+  app.get("/health", async (req, res) => {
+    try {
+      // Test database connectivity
+      const dbResult = await db.query('SELECT 1');
+      const dbHealthy = dbResult.rows && dbResult.rows.length > 0;
+      
+      res.status(200).json({
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || "development",
+        version: process.env.npm_package_version || "1.0.0",
+        database: dbHealthy ? "connected" : "disconnected"
+      });
+    } catch (error) {
+      console.error('Health check failed:', error);
+      res.status(503).json({
+        status: "unhealthy",
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || "development",
+        database: "error",
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
   });
 
   // Alternative health check endpoints

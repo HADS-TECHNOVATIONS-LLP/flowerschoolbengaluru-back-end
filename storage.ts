@@ -7,6 +7,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string,password: string): Promise<User | undefined>;
+  getUserByEmailOnly(email: string): Promise<User | undefined>;
   getUserByPhone(phone: string): Promise<User | undefined>;
   // Check if any user has this exact password (used for login heuristics)
   passwordExists(password: string): Promise<boolean>;
@@ -620,6 +621,11 @@ export class MemStorage implements IStorage {
   async getUserByEmail(email: string,password: string): Promise<User | undefined> {
     console.log('Searching for user by email:', email);
     return Array.from(this.users.values()).find(user => user.email === email && user.password === password);
+  }
+
+  async getUserByEmailOnly(email: string): Promise<User | undefined> {
+    console.log('Searching for user by email only:', email);
+    return Array.from(this.users.values()).find(user => user.email === email);
   }
 
   async getUserByPhone(phone: string): Promise<User | undefined> {
