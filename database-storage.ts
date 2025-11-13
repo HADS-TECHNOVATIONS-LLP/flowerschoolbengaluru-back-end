@@ -481,15 +481,17 @@ return result.rows[0];
         const alnum = cleaned.replace(/[^a-zA-Z0-9 ]+/g, '').trim();
         if (alnum && alnum !== cleaned) variants.add(alnum);
 
-        // Build clause that checks all variants (OR between variants)
+        // Build clause that checks all variants (OR between variants).
+        // Use main_category and subcategory (both stored as text/JSON) and match using ILIKE so
+        // values stored as arrays (JSON) or comma-separated lists will still match the term.
         const variantClauses: string[] = [];
         variants.forEach((v) => {
           const paramIndex = params.length + 1;
           params.push(`%${v}%`);
           variantClauses.push(`(
-            LOWER(category) LIKE LOWER($${paramIndex}) OR 
-            LOWER(subcategory) LIKE LOWER($${paramIndex}) OR
-            LOWER(name) LIKE LOWER($${paramIndex}) OR 
+            LOWER(COALESCE(main_category::text, '')) LIKE LOWER($${paramIndex}) OR
+            LOWER(COALESCE(subcategory::text, '')) LIKE LOWER($${paramIndex}) OR
+            LOWER(name) LIKE LOWER($${paramIndex}) OR
             LOWER(description) LIKE LOWER($${paramIndex})
           )`);
         });
@@ -520,10 +522,7 @@ return result.rows[0];
         addSearchClause(searchKeyword, 'keyword');
       }
 
-  // Build WHERE clause
-  // Do not force inStock=true here; routes.ts will apply the inStock filter when requested.
-  // Returning all active products for category/subcategory/search allows the frontend to
-  // show out-of-stock items if desired (and keeps results consistent across categories).
+
   let where = `isactive = true`;
       if (searchClauses.length > 0) {
         // Use OR to combine search clauses for broader matching
@@ -540,6 +539,47 @@ return result.rows[0];
       return res.rows || [];
     } catch (error) {
       console.error('Error in getProductsByCategoryAndSubcategory:', error);
+      return [];
+    }
+  }
+
+  // Get products by main category and subcategory (precise matching for user navigation)
+  async getProductsBySpecificSubcategory(subcategory: string, mainCategory?: string): Promise<Product[]> {
+    try {
+      console.log(`[DB] Searching for products - Main Category: "${mainCategory}", Subcategory: "${subcategory}"`);
+      
+      const params: any[] = [];
+      const conditions: string[] = ['isactive = true'];
+      
+      // Add main category condition if provided - handle JSON array format like ["flower-types"]
+      if (mainCategory && mainCategory !== 'all') {
+        params.push(mainCategory);
+        conditions.push(`main_category::jsonb ? $${params.length}`);
+        console.log(`[DB] Added main category filter for JSON array: "${mainCategory}"`);
+      }
+      
+      // Add subcategory condition - handle JSON array format like ["Lilies"]
+      if (subcategory) {
+        params.push(subcategory);
+        conditions.push(`subcategory::jsonb ? $${params.length}`);
+        console.log(`[DB] Added subcategory filter for JSON array: "${subcategory}"`);
+      }
+      
+      const query = `
+        SELECT * FROM bouquetbar.products 
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY featured DESC, createdat DESC
+      `;
+      
+      console.log('Executing specific category/subcategory query:', query);
+      console.log('With parameters:', params);
+      
+      const result = await db.query(query, params);
+      console.log(`[DB] Found ${result.rows?.length ?? 0} products for main_category="${mainCategory}" subcategory="${subcategory}"`);
+      
+      return result.rows || [];
+    } catch (error) {
+      console.error('Error in getProductsBySpecificSubcategory:', error);
       return [];
     }
   }
@@ -861,14 +901,21 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
 }
 
   async getProductsByCategory(category: string): Promise < Product[] > {
+  // Support products where categories are stored in `main_category` or `subcategory`.
+  // Match using ILIKE so JSON-encoded arrays or comma-separated lists still match.
+  const pattern = `%${category}%`;
   const query = `
     SELECT *
     FROM bouquetbar.products
-    WHERE category = '${category}'
-    AND isactive = true;
+    WHERE isactive = true
+      AND (
+        LOWER(COALESCE(main_category::text, '')) LIKE LOWER($1) OR
+        LOWER(COALESCE(subcategory::text, '')) LIKE LOWER($1)
+      )
+    ORDER BY createdat DESC;
   `;
-  console.log('Executing query:', query);
-  const result = await db.query(query);
+  console.log('Executing query:', query, 'with pattern:', pattern);
+  const result = await db.query(query, [pattern]);
   console.log('Query Result:', result.rows);
   return result.rows;
 }
@@ -1045,13 +1092,29 @@ if (updates.price !== undefined) {
   valueCount++;
 }
 
-// Handle category field
-if (updates.category !== undefined) {
-  updateFields.push(`category = $${valueCount}`);
-  const categoryValue = Array.isArray(updates.category) ? JSON.stringify(updates.category) : updates.category;
-  values.push(categoryValue);
-  valueCount++;
-}
+    // Handle main_category and subcategory fields (support legacy `category` field)
+    if ((updates as any).main_category !== undefined || (updates as any).mainCategory !== undefined) {
+      const mainVal = (updates as any).main_category ?? (updates as any).mainCategory;
+      const mainValue = Array.isArray(mainVal) ? JSON.stringify(mainVal) : mainVal;
+      updateFields.push(`main_category = $${valueCount}`);
+      values.push(mainValue);
+      valueCount++;
+    }
+
+    // Prefer explicit `subcategory` if provided. Otherwise fall back to legacy `category`.
+    if ((updates as any).subcategory !== undefined) {
+      const subVal = (updates as any).subcategory;
+      const subValue = Array.isArray(subVal) ? JSON.stringify(subVal) : subVal;
+      updateFields.push(`subcategory = $${valueCount}`);
+      values.push(subValue);
+      valueCount++;
+    } else if ((updates as any).category !== undefined) {
+      const catVal = (updates as any).category;
+      const catValue = Array.isArray(catVal) ? JSON.stringify(catVal) : catVal;
+      updateFields.push(`subcategory = $${valueCount}`);
+      values.push(catValue);
+      valueCount++;
+    }
 
 // Handle stockquantity field
 const stockQty = updates.stockQuantity ?? (updates as any).stockquantity;
@@ -1090,12 +1153,7 @@ if ((updates as any).isbestseller !== undefined) {
   valueCount++;
 }
 
-// Handle subcategory field - FIXED: Check if property exists before using
-if ((updates as any).subcategory !== undefined) {
-  updateFields.push(`subcategory = $${valueCount}`);
-  values.push((updates as any).subcategory);
-  valueCount++;
-}
+// NOTE: subcategory handled above (explicit subcategory or legacy category mapping)
 
 // Handle image fields
 if (updates.image !== undefined) {
@@ -1218,8 +1276,13 @@ return result.rows[0];
         throw new Error('Invalid stock quantity. Must be a non-negative number.');
       }
 
-      // Normalize category to a JSON string when an array is provided
-      const categoryValue = Array.isArray(productData.category) ? JSON.stringify(productData.category) : productData.category;
+        // Normalize subcategory and main_category to JSON strings when arrays are provided
+        const subcategoryValue = Array.isArray(productData.subcategory) ? JSON.stringify(productData.subcategory) : (Array.isArray(productData.category) ? JSON.stringify(productData.category) : (productData.subcategory ?? productData.category ?? null));
+        let mainCategoryValue = Array.isArray(productData.main_category) ? JSON.stringify(productData.main_category) : (Array.isArray(productData.mainCategory) ? JSON.stringify(productData.mainCategory) : (productData.main_category ?? productData.mainCategory ?? null));
+        // If main_category not provided, default it to subcategory for backward compatibility
+        if (!mainCategoryValue && subcategoryValue) {
+          mainCategoryValue = subcategoryValue;
+        }
 
       // Normalize price/original/discount values so we always insert consistent numbers
       const normalizedPrice = (productData.price !== undefined && productData.price !== null) ? Number(productData.price) : (productData.originalPrice !== undefined && productData.originalPrice !== null ? Number(productData.originalPrice) : 0);
@@ -1239,11 +1302,11 @@ return result.rows[0];
         const query = {
           text: `
           INSERT INTO bouquetbar.products (
-            name, description, price, originalprice, discount_percentage, discount_amount, category, stockquantity,
+            name, description, price, originalprice, discount_percentage, discount_amount, main_category, subcategory, stockquantity,
             "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image,
             createdat
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
           RETURNING *;
         `,
           values: [
@@ -1253,7 +1316,8 @@ return result.rows[0];
             productData.originalPrice,
             productData.discountPercentage,
             productData.discountAmount,
-            categoryValue,
+            mainCategoryValue,
+            subcategoryValue,
             stockQuantity,
             stockQuantity > 0,
             productData.featured || false,
@@ -1273,18 +1337,19 @@ return result.rows[0];
         const basicQuery = {
           text: `
           INSERT INTO bouquetbar.products (
-            name, description, price, category, stockquantity,
+            name, description, price, main_category, subcategory, stockquantity,
             "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image,
             createdat
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
           RETURNING *;
         `,
           values: [
             productData.name,
             productData.description,
             normalizedPrice,
-            categoryValue,
+            mainCategoryValue,
+            subcategoryValue,
             stockQuantity,
             stockQuantity > 0,
             productData.featured || false,
@@ -2651,6 +2716,9 @@ const validatedOrder: InsertOrder = {
   discountAmount: calculatedPricing.discountAmount.toString(),
   paymentMethod: orderData.paymentMethod,
   paymentCharges: calculatedPricing.paymentCharges.toString(),
+  // include optional payment transaction id/status if client provided (e.g., after gateway payment)
+  paymentTransactionId: orderData.paymentTransactionId,
+  paymentStatus: orderData.paymentStatus,
   total: calculatedPricing.total.toString(),
   shippingAddressId: orderData.shippingAddressId,
   deliveryAddress: orderData.deliveryAddress,
@@ -2751,10 +2819,10 @@ return {
         ${validatedOrder.discountAmount || 0},
         ${validatedOrder.shippingAddressId ? `'${validatedOrder.shippingAddressId}'` : "NULL"},
         '${orderNumber}',
-        '${validatedOrder.paymentMethod || 'Cash'}',
-        ${validatedOrder.paymentCharges || 0},
-        'pending',
-        '${validatedOrder.paymentTransactionId || ""}',
+  '${validatedOrder.paymentMethod || 'Cash'}',
+  ${validatedOrder.paymentCharges || 0},
+  '${validatedOrder.paymentStatus || 'pending'}',
+  '${validatedOrder.paymentTransactionId || ""}',
         ${validatedOrder.estimatedDeliveryDate && validatedOrder.estimatedDeliveryDate instanceof Date && !isNaN(validatedOrder.estimatedDeliveryDate.getTime()) ? `'${validatedOrder.estimatedDeliveryDate.toISOString()}'` : "NULL"},
         NOW(),
         NOW(),
