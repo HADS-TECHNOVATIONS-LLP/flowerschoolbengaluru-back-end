@@ -126,17 +126,32 @@ export class DatabaseStorage implements IStorage {
   }
 }
 
-  async getUserByEmailOnly(email: string): Promise < User | undefined > {
-  if(!email) return undefined;
-  const query = `SELECT *
-            FROM bouquetbar.users
-            WHERE email = '${email}'
-            LIMIT 1`;
-  console.log('Executing query:', query);
-  const result = await db.query(query);
-  console.log('Query Result:', result.rows || 'No user found');
-  return result.rows[0] || undefined;
-}
+  async getUserByEmailOnly(email: string): Promise<User | undefined> {
+    if (!email) {
+      console.log('getUserByEmailOnly: No email provided');
+      return undefined;
+    }
+    
+    try {
+      // Use parameterized query to prevent SQL injection
+      const query = `SELECT * FROM bouquetbar.users WHERE email = $1 LIMIT 1`;
+      console.log('Executing query for email:', email);
+      
+      const result = await db.query(query, [email]);
+      console.log('Query result rows count:', result.rows?.length || 0);
+      
+      if (result.rows && result.rows.length > 0) {
+        console.log('User found for email:', email);
+        return result.rows[0] as User;
+      } else {
+        console.log('No user found for email:', email);
+        return undefined;
+      }
+    } catch (error) {
+      console.error('Error in getUserByEmailOnly:', error);
+      throw new Error(`Failed to get user by email: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
 
   async getUserByPhone(phone: string): Promise < User | undefined > {
   if(!phone) return undefined;
