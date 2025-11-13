@@ -5,6 +5,278 @@ import { getAllCustomRequests } from "./database-storage.js";
 import { db } from "./db.js";
 import { insertOrderSchema, insertEnrollmentSchema, insertUserSchema, updateUserProfileSchema, validateCouponSchema, addressValidationSchema, orderPlacementSchema } from "./shared/schema.js";
 import { z } from "zod";
+// Master category data for filtering
+const allCategories = [
+    {
+        id: "occasion",
+        name: "Occasion",
+        groups: [
+            {
+                title: "Celebration Flowers",
+                items: [
+                    "Father's Day",
+                    "Mother's Day",
+                    "Valentine's Day",
+                    "Self-Flowers (self-love / pampering)",
+                    "Sister Love",
+                    "Brother Love",
+                    "Friendship Day",
+                    "Anniversary",
+                    "Birthday",
+                    "Get Well Soon / Recovery Flowers",
+                    "I'm Sorry Flowers",
+                    "I Love You Flowers",
+                    "Congratulations Flowers",
+                    "Graduation Day Flowers",
+                    "Promotion / Success Party Flowers",
+                ]
+            },
+            {
+                title: "Special Occasions",
+                items: [
+                    "Proposal / Date Night Flowers",
+                    "Baby Showers Flowers",
+                    "New Baby Arrival Flowers",
+                    "Housewarming Flowers",
+                    "Teacher's Day Flowers",
+                    "Children's Day Flowers",
+                    "Farewell Flowers",
+                    "Retirement Flowers",
+                    "Women's Day Flowers",
+                    "Men's Day Flowers",
+                    "Good Luck Flowers (before exams, interviews, journeys)",
+                    "Grandparent's Day Flowers",
+                    "Pride Month Flowers"
+                ]
+            }
+        ]
+    },
+    {
+        id: "arrangements",
+        name: "Arrangement",
+        groups: [
+            {
+                title: "Popular Arrangements",
+                items: [
+                    "Bouquets (hand-tied, wrapped)",
+                    "Flower Baskets",
+                    "Flower Boxes",
+                    "Vase Arrangements",
+                    "Floral Centerpieces",
+                    "Flower Garlands",
+                    "Lobby Arrangements",
+                    "Exotic Arrangements"
+                ]
+            },
+            {
+                title: "Specialty Arrangements",
+                items: [
+                    "Exotic Arrangements",
+                    "Floral Cross Arrangement",
+                    "Baby's Breath Arrangement",
+                    "Gladiolus Arrangement",
+                    "Wine Bottle Arrangements",
+                    "Floral Wreaths",
+                    "Custom Arrangements",
+                ]
+            }
+        ]
+    },
+    {
+        id: "flower-types",
+        name: "Flowers",
+        groups: [
+            {
+                title: "Popular Flowers",
+                items: [
+                    "Tulips",
+                    "Lilies",
+                    "Carnations",
+                    "Orchids",
+                    "Sunflowers",
+                    "Mixed Flowers",
+                    "Roses",
+                    "Get Well Soon / Recovery Flowers",
+                ]
+            },
+            {
+                title: "Specialty Flowers",
+                items: [
+                    "Baby's Breath",
+                    "Chrysanthemum",
+                    "Hydrangea",
+                    "Anthurium",
+                    "Calla Lilies",
+                    "Gerberas",
+                    "Peonies",
+                    "Retirement Flowers",
+                ]
+            }
+        ]
+    },
+    {
+        id: "gift-combo",
+        name: "Gifts",
+        groups: [
+            {
+                title: "Flower Combos",
+                items: [
+                    "Flowers with Greeting Cards",
+                    "Flower with Fruits",
+                    "Floral Gift Hampers",
+                    "Flower with Chocolates",
+                    "Flower with Cakes",
+                    "Flowers with Cheese",
+                    "Flowers with Nuts",
+                    "Good Luck Flowers (before exams, interviews, journeys)",
+                    "Grandparent's Day Flowers",
+                    "Pride Month Flowers",
+                    "Thank You"
+                ]
+            },
+            {
+                title: "Special Gift Sets",
+                items: [
+                    "Best Wishes",
+                    "Flowers with Customized Gifts",
+                    "Flowers with Wine",
+                    "Flowers with Perfume",
+                    "Flowers with Jewelry",
+                    "Flowers with Teddy Bears",
+                    "Flowers with Scented Candles",
+                    "Flowers with Personalized Items",
+                    "Farewell Flowers",
+                    "Teacher's Day Flowers",
+                    "Children's Day Flowers",
+                    "Farewell Flowers",
+                ]
+            }
+        ]
+    },
+    {
+        id: "event-decoration",
+        name: "Event/Venue",
+        groups: [
+            {
+                title: "Event Decorations",
+                items: [
+                    "Wedding Floral Decor",
+                    "Corporate Event Flowers",
+                    "Party Flower Decorations",
+                    "Stage & Backdrop Flowers",
+                    "Car Decoration Flowers",
+                    "Temple / Pooja Flowers",
+                    "Birthday Decorations",
+                ]
+            },
+            {
+                title: "Venue Arrangements",
+                items: [
+                    "Entrance Arrangements",
+                    "Table Centerpieces",
+                    "Aisle Decorations",
+                    "Archway Flowers",
+                    "Ceiling Installations",
+                    "Wall Decorations",
+                    "Outdoor Event Flowers",
+                ]
+            }
+        ]
+    },
+    {
+        id: "services",
+        name: "Services",
+        groups: [
+            {
+                title: "Delivery Services",
+                items: [
+                    "Same-Day Flower Delivery",
+                    "Next Day Delivery",
+                    "Customized Message Cards",
+                    "Floral Subscriptions Weekly/monthly",
+                ]
+            },
+        ]
+    },
+    {
+        id: "memorial",
+        name: "Memorial/Sympathy",
+        groups: [
+            {
+                title: "Sympathy",
+                items: [
+                    "Pet Memorial Flowers",
+                    "Funeral Wreaths",
+                    "Condolence Bouquets",
+                    "Remembrance Flowers",
+                    "Memorial Sprays",
+                    "Casket Arrangements",
+                    "Sympathy",
+                ]
+            },
+            {
+                title: "Memorial Services",
+                items: [
+                    "Funeral Home Delivery",
+                    "Church Arrangements",
+                    "Graveside Flowers",
+                    "Memorial Service Flowers",
+                    "Sympathy Gift Baskets",
+                    "Living Tributes",
+                    "Memorial Donations",
+                ]
+            }
+        ]
+    },
+    {
+        id: "corporate",
+        name: "Corporate",
+        groups: [
+            {
+                title: "Office Arrangements",
+                items: [
+                    "Office Desk Flowers",
+                    "Reception Area Flowers",
+                    "Corporate Gifting Flowers",
+                    "Brand-Themed Floral Arrangements",
+                    "Conference Room Flowers",
+                    "Executive Office Arrangements",
+                    "Lobby Displays",
+                ]
+            },
+            {
+                title: "Corporate Services",
+                items: [
+                    "Corporate Accounts",
+                    "Volume Discounts",
+                    "Regular Maintenance",
+                    "Custom Corporate Designs",
+                    "Event Floristry Services",
+                    "Branded Arrangements",
+                    "Long-term Contracts",
+                ]
+            }
+        ]
+    }
+];
+// Helper function to find subcategories for a main category
+const getSubcategoriesForMainCategory = (mainCategoryId) => {
+    const category = allCategories.find(cat => cat.id === mainCategoryId);
+    if (!category)
+        return [];
+    return category.groups.flatMap(group => group.items);
+};
+// Helper function to find which main category a subcategory belongs to
+const findMainCategoryForSubcategory = (subcategory) => {
+    for (const category of allCategories) {
+        for (const group of category.groups) {
+            if (group.items.some(item => item.toLowerCase() === subcategory.toLowerCase())) {
+                return category.id;
+            }
+        }
+    }
+    return null;
+};
 import twilio from "twilio";
 import { notificationService } from "./services/notification-service.js";
 import { emailService } from "./services/email-service.js";
@@ -382,7 +654,10 @@ export async function registerRoutes(app) {
             });
             // Return user without password
             const { password: _, ...userWithoutPassword } = user;
-            res.json({ status: 'success', user: userWithoutPassword, message: "Signed in successfully", sessionToken });
+            // Also include token in the JSON body (duplicate of cookie) so clients
+            // that rely on a stored token (localStorage fallback) can persist it.
+            // This is safe for dev usage; ensure cookies are still the primary auth mechanism.
+            res.json({ status: 'success', user: userWithoutPassword, message: "Signed in successfully", sessionToken, token: sessionToken });
         }
         catch (error) {
             console.error("Signin error:", error);
@@ -685,12 +960,255 @@ export async function registerRoutes(app) {
             res.status(500).json({ message: "Failed to change password" });
         }
     });
+    // Helper function to apply additional filters to products
+    const applyAdditionalFilters = (products, filters) => {
+        let filteredProducts = [...products];
+        const { minPrice, maxPrice, inStock, featured, bestSeller } = filters;
+        // Filter by price range
+        if (minPrice || maxPrice) {
+            filteredProducts = filteredProducts.filter(product => {
+                const price = parseFloat(product.price);
+                const min = minPrice ? parseFloat(minPrice.toString()) : 0;
+                const max = maxPrice ? parseFloat(maxPrice.toString()) : Infinity;
+                return price >= min && price <= max;
+            });
+        }
+        // Filter by stock status
+        if (inStock === 'true') {
+            filteredProducts = filteredProducts.filter(product => product.inStock);
+        }
+        // Filter by featured status  
+        if (featured === 'true') {
+            filteredProducts = filteredProducts.filter(product => product.featured);
+        }
+        // Filter by best seller status
+        if (bestSeller === 'true') {
+            filteredProducts = filteredProducts.filter(product => product.isbestseller);
+        }
+        return filteredProducts;
+    };
+    // New API endpoint for main_category/subcategory with grouped products
+    // Product name search endpoint
+    app.get("/api/products/search", async (req, res) => {
+        try {
+            const { name } = req.query;
+            if (!name || typeof name !== 'string') {
+                return res.status(400).json({
+                    error: "Name parameter is required",
+                    message: "Please provide a product name to search for"
+                });
+            }
+            console.log(`[PRODUCT NAME SEARCH API] Searching for products with name containing: "${name}"`);
+            // SQL query to search products by name (case-insensitive)
+            const query = `
+        SELECT id, name, main_category, subcategory, price, image
+        FROM bouquetbar.products
+        WHERE name ILIKE $1
+        ORDER BY name;
+      `;
+            const searchPattern = `%${name}%`;
+            const result = await db.query(query, [searchPattern]);
+            console.log(`[PRODUCT NAME SEARCH API] Found ${result.rows.length} products matching "${name}"`);
+            // Format response
+            const products = result.rows.map(row => ({
+                id: row.id,
+                name: row.name,
+                main_category: row.main_category,
+                subcategory: row.subcategory,
+                price: row.price || 0,
+                image: row.image || '',
+                inStock: true // Default to true since we're returning basic fields
+            }));
+            res.status(200).json({
+                searchTerm: name,
+                totalProducts: products.length,
+                products: products
+            });
+        }
+        catch (error) {
+            console.error(`[PRODUCT NAME SEARCH API] Error:`, error);
+            return res.status(500).json({
+                error: "Failed to search products by name",
+                details: error.message
+            });
+        }
+    });
+    // Subcategory search endpoint
+    app.get("/api/products/subcategory/:subcategory", async (req, res) => {
+        try {
+            const { subcategory } = req.params;
+            console.log(`[SUBCATEGORY API] Getting products for subcategory: "${subcategory}"`);
+            // SQL query to get products by subcategory (like your example)
+            const query = `
+        SELECT id, name, main_category, subcategory, price, image
+        FROM bouquetbar.products
+        WHERE subcategory ILIKE $1
+        ORDER BY name;
+      `;
+            const searchPattern = `%${subcategory}%`;
+            const result = await db.query(query, [searchPattern]);
+            console.log(`[SUBCATEGORY API] Found ${result.rows.length} products for subcategory "${subcategory}"`);
+            // Format response
+            const products = result.rows.map(row => ({
+                id: row.id,
+                name: row.name,
+                main_category: row.main_category,
+                subcategory: row.subcategory,
+                price: row.price || 0,
+                image: row.image || '',
+                inStock: true // Default to true since we're returning basic fields
+            }));
+            res.status(200).json({
+                subcategory: subcategory,
+                totalProducts: products.length,
+                products: products
+            });
+        }
+        catch (error) {
+            console.error(`[SUBCATEGORY API] Error:`, error);
+            return res.status(500).json({
+                error: "Failed to fetch products by subcategory",
+                details: error.message
+            });
+        }
+    });
+    app.get("/api/products/main_category/:category", async (req, res) => {
+        try {
+            const { category } = req.params;
+            console.log(`[MAIN_CATEGORY API] Getting products for category: "${category}"`);
+            // SQL query to get products by main category with subcategory information
+            const query = `
+        SELECT id, name, main_category, subcategory, price, image
+        FROM bouquetbar.products
+        WHERE LOWER(main_category::text) LIKE LOWER($1)
+        ORDER BY subcategory, name
+      `;
+            const searchPattern = `%${category}%`;
+            const result = await db.query(query, [searchPattern]);
+            console.log(`[MAIN_CATEGORY API] Found ${result.rows.length} products for category "${category}"`);
+            // Group products by subcategory
+            const groupedProducts = result.rows.reduce((acc, product) => {
+                // Parse subcategory (it might be JSON string or array)
+                let subcategories = [];
+                try {
+                    if (typeof product.subcategory === 'string') {
+                        // Try to parse as JSON array first
+                        const parsed = JSON.parse(product.subcategory);
+                        subcategories = Array.isArray(parsed) ? parsed : [product.subcategory];
+                    }
+                    else if (Array.isArray(product.subcategory)) {
+                        subcategories = product.subcategory;
+                    }
+                    else {
+                        subcategories = [product.subcategory || 'Other'];
+                    }
+                }
+                catch (e) {
+                    // If parsing fails, treat as string
+                    subcategories = [product.subcategory || 'Other'];
+                }
+                // Add product to each subcategory it belongs to
+                subcategories.forEach(subcat => {
+                    if (!acc[subcat]) {
+                        acc[subcat] = [];
+                    }
+                    acc[subcat].push({
+                        id: product.id,
+                        name: product.name,
+                        price: product.price,
+                        image: product.image,
+                        main_category: product.main_category,
+                        subcategory: product.subcategory,
+                        // Set default values for missing fields
+                        inStock: true,
+                        discounts_offers: false,
+                        featured: false,
+                        isbestseller: false
+                    });
+                });
+                return acc;
+            }, {});
+            // Return both flat list and grouped data
+            const response = {
+                category,
+                totalProducts: result.rows.length,
+                allProducts: result.rows.map(product => ({
+                    id: product.id,
+                    name: product.name,
+                    price: product.price,
+                    image: product.image,
+                    main_category: product.main_category,
+                    subcategory: product.subcategory,
+                    // Set default values for missing fields
+                    inStock: true,
+                    discounts_offers: false,
+                    featured: false,
+                    isbestseller: false
+                })),
+                subcategories: groupedProducts
+            };
+            res.set('Cache-Control', 'no-store');
+            return res.status(200).json(response);
+        }
+        catch (error) {
+            console.error(`[MAIN_CATEGORY API] Error:`, error);
+            return res.status(500).json({
+                error: "Failed to fetch products by main category",
+                details: error.message
+            });
+        }
+    });
     app.get("/api/products", async (req, res) => {
         try {
-            const { category, subcategory, search, minPrice, maxPrice, inStock, featured, bestSeller } = req.query;
-            // If category, subcategory, or search is specified, use enhanced filtering
-            if (category || subcategory || search) {
-                const products = await storage.getProductsByCategoryAndSubcategory(category?.toString() || '', subcategory?.toString(), search?.toString());
+            const { main_category, subcategory, search, minPrice, maxPrice, inStock, featured, bestSeller } = req.query;
+            console.log(`[PRODUCTS API] Request params:`, { main_category, subcategory, search });
+            // Handle specific subcategory filtering (when user clicks on a specific subcategory like "Tulips")
+            if (subcategory && !search) {
+                console.log(`[PRODUCTS API] Filtering by specific subcategory: "${subcategory}" under main_category: "${main_category}"`);
+                // Use main_category parameter
+                const mainCategoryValue = main_category ? main_category.toString() : '';
+                // Call database function with both main category and subcategory
+                let products = await storage.getProductsByCategoryAndSubcategory(mainCategoryValue, subcategory.toString());
+                console.log(`[PRODUCTS API] Found ${products.length} products for main_category="${main_category}" subcategory="${subcategory}"`);
+                // Normalize stock status first
+                let filteredProducts = normalizeProductsStockStatus(products);
+                // Apply additional filters
+                filteredProducts = applyAdditionalFilters(filteredProducts, { minPrice, maxPrice, inStock, featured, bestSeller });
+                res.set('Cache-Control', 'no-store');
+                return res.status(200).json(filteredProducts);
+            }
+            // Enhanced category filtering using master data for broader searches
+            if (main_category || (subcategory && subcategory.toString().trim() !== '') || search) {
+                let searchSubcategories = [];
+                // If a main category is provided (e.g., "flower-types"), get all its subcategories
+                // Handle both undefined and empty string subcategories
+                if (main_category && (!subcategory || subcategory.toString().trim() === '')) {
+                    const categorySubcats = getSubcategoriesForMainCategory(main_category.toString());
+                    if (categorySubcats.length > 0) {
+                        searchSubcategories = categorySubcats;
+                        console.log(`[PRODUCTS API] Main category "${main_category}" expanded to subcategories:`, categorySubcats);
+                    }
+                    else {
+                        // If not found in master data, treat as direct search term
+                        searchSubcategories = [main_category.toString()];
+                    }
+                }
+                // If a subcategory is provided with search, use it directly
+                if (subcategory && subcategory.toString().trim() !== '' && search) {
+                    const subcats = subcategory.toString().split(',').map(s => s.trim()).filter(Boolean);
+                    searchSubcategories = [...searchSubcategories, ...subcats];
+                }
+                // If search is provided, add it to subcategories
+                if (search) {
+                    searchSubcategories = [...searchSubcategories, search.toString()];
+                }
+                console.log(`[PRODUCTS API] Final search subcategories:`, searchSubcategories);
+                // Get products using the enhanced subcategory search
+                let products = await storage.getProductsByCategoryAndSubcategory('', // Don't pass category to avoid double filtering
+                searchSubcategories.join(','), // Pass all subcategories as comma-separated
+                '' // Don't pass search separately
+                );
+                console.log(`[PRODUCTS API] Found ${products.length} products from database`);
                 // Normalize stock status first
                 let filteredProducts = normalizeProductsStockStatus(products);
                 // Apply additional filters if provided
@@ -792,10 +1310,12 @@ export async function registerRoutes(app) {
                 if (filteredProducts.length === 0 && (flowerTypesParam || arrangementsParam || colorsParam)) {
                     try {
                         const allProducts = normalizeProductsStockStatus(await storage.getAllProducts());
+                        // Ensure category key is present for backwards compatibility
+                        const allProductsWithCategory = allProducts.map(p => ({ ...p, category: p.main_category ?? p.category ?? p.subcategory }));
                         const types = flowerTypesParam ? flowerTypesParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean) : [];
                         const arrs = arrangementsParam ? arrangementsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean) : [];
                         const cols = colorsParam ? colorsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean) : [];
-                        const fallback = allProducts.filter(prod => {
+                        const fallback = allProductsWithCategory.filter(prod => {
                             const cats = parseCategoryToArray(prod.category).join(' ');
                             const sub = prod.subcategory ? String(prod.subcategory).toLowerCase() : '';
                             const name = prod.name ? String(prod.name).toLowerCase() : '';
@@ -814,12 +1334,14 @@ export async function registerRoutes(app) {
                         // proceed to return the empty filteredProducts below
                     }
                 }
-                console.log(`Products API: Found ${filteredProducts.length} products for category="${category}" subcategory="${subcategory}" search="${search}"`);
+                console.log(`Products API: Found ${filteredProducts.length} products for main_category="${main_category}" subcategory="${subcategory}" search="${search}"`);
                 res.set('Cache-Control', 'no-store');
                 return res.status(200).json(filteredProducts);
             }
             // Otherwise get all products
             let products = await storage.getAllProducts();
+            // Ensure category field exists for compatibility (derive from main_category or subcategory)
+            products = products.map(p => ({ ...p, category: p.main_category ?? p.category ?? p.subcategory }));
             // Normalize stock status for all products
             products = normalizeProductsStockStatus(products);
             // Apply best seller filter if specified
@@ -837,8 +1359,10 @@ export async function registerRoutes(app) {
     app.get("/api/products/featured", async (req, res) => {
         try {
             const products = await storage.getFeaturedProducts();
+            // ensure category present
+            const productsWithCategory = products.map(p => ({ ...p, category: p.main_category ?? p.category ?? p.subcategory }));
             // Normalize stock status for featured products
-            const normalizedProducts = normalizeProductsStockStatus(products);
+            const normalizedProducts = normalizeProductsStockStatus(productsWithCategory);
             res.json(normalizedProducts);
         }
         catch (error) {
@@ -852,7 +1376,8 @@ export async function registerRoutes(app) {
                 return res.status(404).json({ message: "Product not found" });
             }
             // Normalize stock status for single product
-            const normalizedProduct = normalizeProductStockStatus(product);
+            let normalizedProduct = normalizeProductStockStatus(product);
+            normalizedProduct = { ...normalizedProduct, category: normalizedProduct.main_category ?? normalizedProduct.category ?? normalizedProduct.subcategory };
             res.json(normalizedProduct);
         }
         catch (error) {
@@ -1346,6 +1871,15 @@ export async function registerRoutes(app) {
                 });
             }
             console.log('Payment verification successful:', razorpay_payment_id);
+            // Fetch payment details from Razorpay so we can return method and status
+            let paymentDetails = null;
+            try {
+                paymentDetails = await razorpay.payments.fetch(razorpay_payment_id);
+                console.log('[PAYMENT VERIFY] Fetched payment details from Razorpay:', { id: paymentDetails.id, method: paymentDetails.method, status: paymentDetails.status });
+            }
+            catch (fetchErr) {
+                console.error('[PAYMENT VERIFY] Failed to fetch payment details from Razorpay:', fetchErr);
+            }
             // If enrollment data is provided, save to pay later table
             if (enrollment_data) {
                 try {
@@ -1451,7 +1985,9 @@ export async function registerRoutes(app) {
                         message: 'Payment verified and enrollment recorded successfully',
                         payment: {
                             order_id: razorpay_order_id,
-                            payment_id: razorpay_payment_id
+                            payment_id: razorpay_payment_id,
+                            method: paymentDetails?.method || null,
+                            status: paymentDetails?.status || null
                         },
                         enrollment: payLaterResult
                     });
@@ -1472,12 +2008,15 @@ export async function registerRoutes(app) {
             }
             else {
                 // Just verify payment without enrollment
+                // Return payment details (method/status) when available so the client can map payment method
                 res.json({
                     success: true,
                     message: 'Payment verified successfully',
                     payment: {
                         order_id: razorpay_order_id,
-                        payment_id: razorpay_payment_id
+                        payment_id: razorpay_payment_id,
+                        method: paymentDetails?.method || null,
+                        status: paymentDetails?.status || null
                     }
                 });
             }
@@ -3683,6 +4222,15 @@ export async function registerRoutes(app) {
                 imagethirder: cleanBase64(images[3]) || null,
                 imagefoure: cleanBase64(images[4]) || null
             };
+            // Preserve main_category / subcategory if provided by client (frontend sends these)
+            if (raw.main_category !== undefined)
+                productData.main_category = raw.main_category;
+            if (raw.mainCategory !== undefined)
+                productData.main_category = raw.mainCategory;
+            if (raw.subcategory !== undefined)
+                productData.subcategory = raw.subcategory;
+            if (raw.sub_category !== undefined)
+                productData.subcategory = raw.sub_category;
             // Server-side pricing normalization: if discountPercentage is present, prefer originalPrice to compute discountAmount & final price
             if (typeof productData.discountPercentage === 'number' && !isNaN(productData.discountPercentage)) {
                 // If originalPrice not provided, assume originalPrice equals provided price (or 0)
@@ -3704,15 +4252,19 @@ export async function registerRoutes(app) {
                     productData.discountAmount = 0;
             }
             // Validate required fields
-            if (!productData.name || !productData.description || productData.price === undefined || !productData.category) {
-                return res.status(400).json({ error: "Missing required fields" });
+            // Accept either main_category or subcategory (or legacy category) to be present
+            if (!productData.name || !productData.description || productData.price === undefined || !(productData.main_category || productData.subcategory || productData.category)) {
+                return res.status(400).json({ error: "Missing required fields: name, description, price and at least one of main_category/subcategory" });
             }
             const product = await storage.createProduct(productData);
             res.status(201).json(product);
         }
         catch (error) {
             console.error("Error creating product:", error);
-            res.status(500).json({ error: "Failed to create product" });
+            // Return error details in development to aid debugging (temporary)
+            const details = error instanceof Error ? error.message : String(error);
+            const stack = (process.env.NODE_ENV !== 'production' && error instanceof Error) ? error.stack : undefined;
+            res.status(500).json({ error: "Failed to create product", details, stack });
         }
     });
     // Enhanced upload endpoint for multiple images at once (alternative)
