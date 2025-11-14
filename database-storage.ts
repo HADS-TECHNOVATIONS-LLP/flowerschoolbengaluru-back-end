@@ -932,6 +932,127 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
   return result.rows;
 }
 
+  async getProductsByMainCategory(mainCategory: string): Promise<Product[]> {
+    try {
+      const query = `
+        SELECT *
+        FROM bouquetbar.products
+        WHERE isactive = true
+          AND "inStock" = true
+          AND (
+            main_category::jsonb ? $1 OR
+            main_category::text ILIKE $2
+          )
+        ORDER BY createdat DESC;
+      `;
+      const searchPattern = `%${mainCategory}%`;
+      console.log('Executing getProductsByMainCategory query:', query, 'with main_category:', mainCategory);
+      const result = await db.query(query, [mainCategory, searchPattern]);
+      console.log('Query Result:', result.rows?.length ?? 0, 'products found');
+      return result.rows || [];
+    } catch (error) {
+      console.error('Error in getProductsByMainCategory:', error);
+      return [];
+    }
+  }
+
+  async getProductsBySubcategory(subcategory: string): Promise<Product[]> {
+    try {
+      const query = `
+        SELECT *
+        FROM bouquetbar.products
+        WHERE isactive = true
+          AND "inStock" = true
+          AND (
+            subcategory::jsonb ? $1 OR
+            subcategory::text ILIKE $2
+          )
+        ORDER BY createdat DESC;
+      `;
+      const searchPattern = `%${subcategory}%`;
+      console.log('Executing getProductsBySubcategory query:', query, 'with subcategory:', subcategory);
+      const result = await db.query(query, [subcategory, searchPattern]);
+      console.log('Query Result:', result.rows?.length ?? 0, 'products found');
+      return result.rows || [];
+    } catch (error) {
+      console.error('Error in getProductsBySubcategory:', error);
+      return [];
+    }
+  }
+
+  async getProductsByNameSearch(searchTerm: string): Promise<Product[]> {
+    try {
+      const query = `
+        SELECT *
+        FROM bouquetbar.products
+        WHERE isactive = true
+          AND "inStock" = true
+          AND (
+            subcategory::jsonb ? $1 OR
+            subcategory::text ILIKE $2 OR 
+            main_category::jsonb ? $1 OR
+            main_category::text ILIKE $2 OR
+            name ILIKE $2 OR
+            description ILIKE $2
+          )
+        ORDER BY 
+          CASE 
+            WHEN name ILIKE $2 THEN 1
+            WHEN subcategory::jsonb ? $1 THEN 2
+            WHEN main_category::jsonb ? $1 THEN 3
+            WHEN subcategory::text ILIKE $2 THEN 4
+            WHEN main_category::text ILIKE $2 THEN 5
+            WHEN description ILIKE $2 THEN 6
+            ELSE 7
+          END,
+          createdat DESC;
+      `;
+      const searchPattern = `%${searchTerm}%`;
+      console.log('Executing getProductsByNameSearch query:', query, 'with searchTerm:', searchTerm);
+      const result = await db.query(query, [searchTerm, searchPattern]);
+      console.log('Query Result:', result.rows?.length ?? 0, 'products found');
+      return result.rows || [];
+    } catch (error) {
+      console.error('Error in getProductsByNameSearch:', error);
+      return [];
+    }
+  }
+
+  async getProductsByMainCategoryAndSubcategory(mainCategory: string, subcategory: string): Promise<Product[]> {
+    try {
+      const query = `
+        SELECT *
+        FROM bouquetbar.products
+        WHERE isactive = true
+          AND "inStock" = true
+          AND (
+            main_category::jsonb ? $1 OR
+            main_category::text ILIKE $3
+          )
+          AND (
+            subcategory::jsonb ? $2 OR
+            subcategory::text ILIKE $4
+          )
+        ORDER BY 
+          CASE 
+            WHEN subcategory::jsonb ? $2 AND main_category::jsonb ? $1 THEN 1
+            WHEN subcategory::text ILIKE $4 AND main_category::text ILIKE $3 THEN 2
+            ELSE 3
+          END,
+          createdat DESC;
+      `;
+      const mainCategoryPattern = `%${mainCategory}%`;
+      const subcategoryPattern = `%${subcategory}%`;
+      console.log('Executing getProductsByMainCategoryAndSubcategory query:', query, 'with mainCategory:', mainCategory, 'subcategory:', subcategory);
+      const result = await db.query(query, [mainCategory, subcategory, mainCategoryPattern, subcategoryPattern]);
+      console.log('Query Result:', result.rows?.length ?? 0, 'products found');
+      return result.rows || [];
+    } catch (error) {
+      console.error('Error in getProductsByMainCategoryAndSubcategory:', error);
+      return [];
+    }
+  }
+
   async getDashboardData(): Promise < any > {
   try {
     const query = `
