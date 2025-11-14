@@ -334,9 +334,6 @@ return result.rows[0];
   console.log('User deleted successfully');
 }
 
-
-
-
   // Product Methods
   async getAllProducts(): Promise < Product[] > {
   try {
@@ -3892,15 +3889,7 @@ return obj;
   async updateEventPricing(pricing: any): Promise < any > {
   try {
 
-
-    // We want to make the table reflect exactly the provided pricing map:
-    // 1) Delete rows whose keys are NOT present in the provided map
-    // 2) Upsert (insert or update) all provided keys
     const keys = Object.keys(pricing || {});
-
-    // Start a transaction so the table stays consistent
-
-
 
     // Upsert each provided key
     for(const key of keys) {
