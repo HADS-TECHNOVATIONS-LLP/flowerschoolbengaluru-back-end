@@ -5,9 +5,10 @@
 This is a TypeScript Express.js backend for an e-commerce flower shop with integrated course enrollment. Key architectural decisions:
 
 - **Dual Storage Pattern**: `storage.ts` (interface) → `database-storage.ts` (implementation) provides clean abstraction
-- **Service Layer**: Background scheduler, notifications, and message queue in `/services`  
+- **Service Layer**: Background scheduler, notifications, message queue, and email service in `/services`  
 - **Schema-First**: Drizzle ORM with Zod validation in `/shared/schema.ts`
 - **Template System**: SMS/WhatsApp templates in `/templates` for consistent messaging
+- **Full-Stack Dev**: Integrated Vite dev server (`vite-dev-server.ts`) serves frontend during development
 
 ## Essential File Structure
 
@@ -19,9 +20,13 @@ This is a TypeScript Express.js backend for an e-commerce flower shop with integ
 ├── database-storage.ts    # PostgreSQL implementation
 ├── db.ts                  # Raw PostgreSQL connection pool
 ├── services/
-│   ├── background-scheduler.ts  # Auto order progression
-│   ├── notification-service.ts  # Twilio SMS/WhatsApp
-│   └── message-queue.ts         # Async processing
+│   ├── background-scheduler.ts  # Auto order progression (30min intervals)
+│   ├── notification-service.ts  # Twilio SMS/WhatsApp integration
+│   ├── message-queue.ts         # Retry logic for failed messages
+│   └── email-service.ts         # SendGrid order confirmations
+├── templates/
+│   ├── sms-templates.ts         # SMS notification templates
+│   └── whatsapp-templates.ts    # WhatsApp notification templates
 └── shared/schema.ts       # Drizzle tables + Zod schemas
 ```
 
@@ -37,7 +42,16 @@ npm run backend         # alias for dev
 ```bash
 npm run build           # TypeScript compilation
 npm run deploy          # Build + PM2 start
+npm run restart         # PM2 restart existing process
+npm run stop            # PM2 stop process
+npm run status          # PM2 process status
 npm run logs            # View PM2 logs
+```
+
+**Docker Development**:
+```bash
+docker-compose up -d    # Start PostgreSQL + backend
+docker-compose logs -f  # Follow container logs
 ```
 
 **Database**: Uses PostgreSQL via connection pool (`db.ts`). No migration system - modify `schema.ts` directly.
@@ -68,7 +82,14 @@ const statusProgressions: OrderStatusProgression[] = [
 const result = await notificationService.sendOrderConfirmation(order);
 ```
 
-### 4. Error Handling Convention
+### 4. Message Queue (Retry Logic)
+```typescript
+// services/message-queue.ts - Auto-retries failed messages
+const retryDelays = [30000, 60000, 300000]; // 30s, 1m, 5m
+queue.enqueue(phone, message, 'whatsapp');
+```
+
+### 5. Error Handling Convention
 ```typescript
 // Consistent across routes.ts
 try {
@@ -79,7 +100,7 @@ try {
 }
 ```
 
-### 5. Category System (Hardcoded)
+### 6. Category System (Hardcoded)
 ```typescript
 // routes.ts line ~15: Master category data for filtering
 const allCategories = [
@@ -94,6 +115,12 @@ const allCategories = [
 - Service: `services/notification-service.ts`  
 - Templates: `/templates/*.ts` files
 - Used for: OTP, order confirmations, status updates
+
+### SendGrid (Email)
+- Config: `config.sendgrid` in `config.ts`
+- Service: `services/email-service.ts`
+- Used for: Order confirmations, receipts
+- Templates: HTML email templates with order details
 
 ### Razorpay Payments
 - Config: `config.razorpay` with live keys
