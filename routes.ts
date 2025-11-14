@@ -1083,7 +1083,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Change Password
   app.put("/api/profile/change-password", async (req, res) => {
     try {
       const { currentPassword, newPassword } = req.body;
@@ -1109,638 +1108,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Helper function to apply additional filters to products
-  const applyAdditionalFilters = (products: any[], filters: any) => {
-    let filteredProducts = [...products];
-    const { minPrice, maxPrice, inStock, featured, bestSeller } = filters;
-    
-    // Filter by price range
-    if (minPrice || maxPrice) {
-      filteredProducts = filteredProducts.filter(product => {
-        const price = parseFloat(product.price);
-        const min = minPrice ? parseFloat(minPrice.toString()) : 0;
-        const max = maxPrice ? parseFloat(maxPrice.toString()) : Infinity;
-        return price >= min && price <= max;
-      });
-    }
-    
-    // Filter by stock status
-    if (inStock === 'true') {
-      filteredProducts = filteredProducts.filter(product => product.inStock);
-    }
-    
-    // Filter by featured status  
-    if (featured === 'true') {
-      filteredProducts = filteredProducts.filter(product => product.featured);
-    }
-
-    // Filter by best seller status
-    if (bestSeller === 'true') {
-      filteredProducts = filteredProducts.filter(product => product.isbestseller);
-    }
-    
-    return filteredProducts;
-  };
-
-  // New API endpoint for main_category/subcategory with grouped products
-  // Product name search endpoint
-  app.get("/api/products/search", async (req, res) => {
-    try {
-      const { maincategory, subcategory, name } = req.query;
-      
-      // Validate that at least one search parameter is provided
-      if (!maincategory && !subcategory && !name) {
-        return res.status(400).json({ 
-          error: "Search parameter required",
-          message: "Please provide maincategory, subcategory, or name to search for"
-        });
-      }
-
-      console.log(`[SEARCH API] Search parameters:`, { maincategory, subcategory, name });
-
-      let query = '';
-      let queryParams = [];
-      let searchType = '';
-
-      // Scenario 1: Main category search - return all products with all subcategories
-      if (maincategory && !subcategory && !name) {
-        searchType = 'main_category';
-        console.log(`[SEARCH API] Main category search for: "${maincategory}"`);
-        
-        query = `
-          SELECT * FROM bouquetbar.products 
-          WHERE (
-            main_category::text = $1 
-            OR main_category::jsonb ? $1 
-            OR main_category ILIKE $2
-          )
-          ORDER BY id DESC
-        `;
-        queryParams = [maincategory, `%${maincategory}%`];
-      }
-      // Scenario 2: Subcategory search - return all products for specific subcategory
-      else if (subcategory && !name) {
-        searchType = 'subcategory';
-        console.log(`[SEARCH API] Subcategory search for: "${subcategory}"`);
-        
-        query = `
-          SELECT * FROM bouquetbar.products 
-          WHERE (
-            subcategory::text = $1 
-            OR subcategory::jsonb ? $1 
-            OR subcategory ILIKE $2
-            OR LOWER(subcategory::text) LIKE LOWER($2)
-            OR (subcategory::jsonb)::text LIKE $2
-          )
-          ORDER BY id DESC
-        `;
-        queryParams = [subcategory, `%${subcategory}%`];
-      }
-      
-      else if (name) {
-        searchType = 'product_name';
-        console.log(`[SEARCH API] Product name search for: "${name}"`);
-        
-        query = `
-          SELECT * FROM bouquetbar.products
-          WHERE name ILIKE $1
-          ORDER BY name
-        `;
-        queryParams = [`%${name}%`];
-      }
-
-      console.log(`[SEARCH API] Query:`, query);
-      console.log(`[SEARCH API] Params:`, queryParams);
-
-      const result = await db.query(query, queryParams);
-      console.log(`[SEARCH API] Found ${result.rows.length} products`);
-
-      // For main category search, group products by subcategory
-      if (searchType === 'main_category') {
-        const subcategoriesGrouped = {};
-        const allProducts = [];
-
-        result.rows.forEach(row => {
-          const product = {
-            id: row.id,
-            name: row.name,
-            price: row.price || 0,
-            image: row.image || '',
-            main_category: row.main_category,
-            subcategory: row.subcategory,
-            description: row.description || '',
-            inStock: row.quantity > 0 || row.stockquantity > 0 || row.instock === true
-          };
-
-          allProducts.push(product);
-
-          // Process subcategory grouping
-          if (row.subcategory) {
-            let subcats = [];
-            try {
-              if (typeof row.subcategory === 'string' && row.subcategory.startsWith('[')) {
-                subcats = JSON.parse(row.subcategory);
-              } else if (typeof row.subcategory === 'string') {
-                subcats = row.subcategory.split(',').map(s => s.trim());
-              } else {
-                subcats = [String(row.subcategory)];
-              }
-            } catch (e) {
-              subcats = [String(row.subcategory)];
-            }
-
-            subcats.forEach(subcat => {
-              if (!subcategoriesGrouped[subcat]) {
-                subcategoriesGrouped[subcat] = [];
-              }
-              subcategoriesGrouped[subcat].push(product);
-            });
-          }
-        });
-
-        return res.status(200).json({
-          success: true,
-          searchType: 'main_category',
-          mainCategory: maincategory,
-          totalProducts: allProducts.length,
-          products: allProducts,
-          subcategories: subcategoriesGrouped
-        });
-      }
-      // For subcategory or product name search, return flat product list
-      else {
-        const products = result.rows.map(row => ({
-          id: row.id,
-          name: row.name,
-          price: row.price || 0,
-          image: row.image || '',
-          main_category: row.main_category,
-          subcategory: row.subcategory,
-          description: row.description || '',
-          inStock: row.quantity > 0 || row.stockquantity > 0 || row.instock === true
-        }));
-
-        // Always return a successful response, even with 0 products
-        return res.status(200).json({
-          success: true,
-          searchType: searchType,
-          [searchType === 'subcategory' ? 'subcategory' : 'searchTerm']: subcategory || name,
-          totalProducts: products.length,
-          products: products,
-          message: products.length === 0 ? `No products found for ${searchType === 'subcategory' ? 'subcategory' : 'search term'}: ${subcategory || name}` : `Found ${products.length} product(s)`
-        });
-      }
-      
-    } catch (error) {
-      console.error(`[SEARCH API] Error:`, error);
-      return res.status(500).json({ 
-        success: false,
-        error: "Failed to search products",
-        details: error.message 
-      });
-    }
-  });
-
-
-
-
-
-  // GET API endpoint for main_category filtering - returns all products for a main category
-  app.get("/api/products/main_category/:mainCategory", async (req, res) => {
-    try {
-      console.log(`[MAIN_CATEGORY_GET API] === REQUEST START ===`);
-      console.log(`[MAIN_CATEGORY_GET API] URL Parameter:`, req.params.mainCategory);
-      
-      const mainCategory = req.params.mainCategory;
-      
-      console.log(`[MAIN_CATEGORY_GET API] Getting all products for category: "${mainCategory}"`);
-
-      let query = '';
-      let queryParams = [];
-
-      // Query to get all products where main_category contains the specified value
-      query = `
-        SELECT * FROM bouquetbar.products 
-        WHERE (
-          main_category::text = $1 
-          OR main_category::jsonb ? $1 
-          OR main_category ILIKE $2
-        )
-        ORDER BY id DESC
-        LIMIT 50
-      `;
-      queryParams = [mainCategory, `%${mainCategory}%`];
-
-      console.log(`[MAIN_CATEGORY_GET API] Query:`, query);
-      console.log(`[MAIN_CATEGORY_GET API] Params:`, queryParams);
-
-      const result = await db.query(query, queryParams);
-      
-      console.log(`[MAIN_CATEGORY_GET API] Found ${result.rows.length} products`);
-      
-      if (result.rows.length > 0) {
-        console.log(`[MAIN_CATEGORY_GET API] Sample product:`, JSON.stringify(result.rows[0], null, 2));
-      }
-      
-      // Extract unique subcategories
-      const allSubcategories = new Set();
-      
-      result.rows.forEach(product => {
-        if (product.subcategory) {
-          try {
-            if (typeof product.subcategory === 'string' && product.subcategory.startsWith('[')) {
-              const subcategoryArray = JSON.parse(product.subcategory);
-              subcategoryArray.forEach(subcat => allSubcategories.add(subcat));
-            } else {
-              allSubcategories.add(product.subcategory);
-            }
-          } catch (e) {
-            allSubcategories.add(product.subcategory);
-          }
-        }
-      });
-      
-      // Simple response
-      const response = {
-        success: true,
-        mainCategory: mainCategory,
-        totalProducts: result.rows.length,
-        allSubcategories: Array.from(allSubcategories),
-        products: result.rows
-      };
-      
-      console.log(`[MAIN_CATEGORY_GET API] Response summary:`, {
-        success: true,
-        mainCategory: mainCategory,
-        totalProducts: result.rows.length,
-        subcategoriesCount: allSubcategories.size
-      });
-      
-      console.log(`[MAIN_CATEGORY_GET API] === SENDING RESPONSE ===`);
-      
-      // Send response with explicit headers
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-      
-      return res.status(200).send(JSON.stringify(response));
-      
-    } catch (error) {
-      console.error(`[MAIN_CATEGORY_GET API] === ERROR ===`);
-      console.error(`[MAIN_CATEGORY_GET API] Error:`, error.message);
-      
-      const errorResponse = { 
-        success: false,
-        error: error.message,
-        mainCategory: req.params.mainCategory || 'unknown'
-      };
-      
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      
-      return res.status(500).send(JSON.stringify(errorResponse));
-    }
-  });
-
-  // Flexible API endpoint for main_category filtering with subcategory - POST method
-  app.post("/api/products/main_category/:mainCategory", async (req, res) => {
-    try {
-      console.log(`[MAIN_CATEGORY_POST API] === REQUEST START ===`);
-      console.log(`[MAIN_CATEGORY_POST API] URL Parameter:`, req.params.mainCategory);
-      console.log(`[MAIN_CATEGORY_POST API] Request body:`, JSON.stringify(req.body, null, 2));
-      console.log(`[MAIN_CATEGORY_POST API] Content-Type:`, req.headers['content-type']);
-      
-      const mainCategoryFromUrl = req.params.mainCategory;
-      const { mainCategory, subcategory } = req.body || {};
-      
-      // Use category from URL parameter or request body
-      const finalMainCategory = mainCategory || mainCategoryFromUrl;
-      
-      console.log(`[MAIN_CATEGORY_POST API] Final category: "${finalMainCategory}", subcategory: "${subcategory}"`);
-
-      let query = '';
-      let queryParams = [];
-
-      // Execute the specific query you requested
-      query = `SELECT * FROM bouquetbar.products WHERE main_category::jsonb ? $1 AND subcategory::jsonb ? $2`;
-      queryParams = [finalMainCategory, subcategory];
-
-      console.log(`[MAIN_CATEGORY_POST API] Query:`, query);
-      console.log(`[MAIN_CATEGORY_POST API] Params:`, queryParams);
-
-      const result = await db.query(query, queryParams);
-      
-      console.log(`[MAIN_CATEGORY_POST API] Found ${result.rows.length} products`);
-      
-      if (result.rows.length > 0) {
-        console.log(`[MAIN_CATEGORY_POST API] Sample product:`, JSON.stringify(result.rows[0], null, 2));
-      }
-      
-      // Very simple response to ensure it displays
-      const simpleResponse = {
-        success: true,
-        mainCategory: finalMainCategory,
-        subcategory: subcategory,
-        totalProducts: result.rows.length,
-        products: result.rows.slice(0, 5) // Limit to first 5 products to ensure response isn't too large
-      };
-      
-      console.log(`[MAIN_CATEGORY_POST API] Response size check:`, {
-        totalProducts: simpleResponse.totalProducts,
-        returnedProducts: simpleResponse.products.length
-      });
-      
-      console.log(`[MAIN_CATEGORY_POST API] === SENDING RESPONSE ===`);
-      
-      // Send response with explicit headers
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-      
-      return res.status(200).send(JSON.stringify(simpleResponse));
-      
-    } catch (error) {
-      console.error(`[MAIN_CATEGORY_POST API] === ERROR ===`);
-      console.error(`[MAIN_CATEGORY_POST API] Error:`, error.message);
-      
-      const errorResponse = { 
-        success: false,
-        error: error.message,
-        mainCategory: req.params.mainCategory || 'unknown',
-        subcategory: req.body?.subcategory || 'unknown'
-      };
-      
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      
-      return res.status(500).send(JSON.stringify(errorResponse));
-    }
-  });
-
-   app.get("/api/products", async (req, res) => {
-    try {
-      const { main_category, subcategory, search, minPrice, maxPrice, inStock, featured, bestSeller } = req.query;
-
-      console.log(`[PRODUCTS API] Request params:`, { main_category, subcategory, search });
-
-      // Handle specific subcategory filtering (when user clicks on a SINGLE subcategory like "Tulips")
-      // Only use this path if subcategory doesn't contain commas (i.e., it's a single subcategory)
-      if (subcategory && !search && !subcategory.toString().includes(',')) {
-        console.log(`[PRODUCTS API] Filtering by single subcategory: "${subcategory}" under main_category: "${main_category}"`);
-        
-        // Use main_category parameter
-        const mainCategoryValue = main_category ? main_category.toString() : '';
-        
-        // Call database function with both main category and subcategory
-        let products = await storage.getProductsByCategoryAndSubcategory(mainCategoryValue, subcategory.toString());
-        
-        console.log(`[PRODUCTS API] Found ${products.length} products for main_category="${main_category}" subcategory="${subcategory}"`);
-        
-        // Normalize stock status first
-        let filteredProducts = normalizeProductsStockStatus(products);
-        
-        // Apply additional filters
-        filteredProducts = applyAdditionalFilters(filteredProducts, { minPrice, maxPrice, inStock, featured, bestSeller });
-        
-        res.set('Cache-Control', 'no-store');
-        return res.status(200).json(filteredProducts);
-      }
-
-      // Enhanced category filtering using master data for broader searches
-      if (main_category || (subcategory && subcategory.toString().trim() !== '') || search) {
-        let searchSubcategories: string[] = [];
-        
-     
-        if (main_category && (!subcategory || subcategory.toString().trim() === '')) {
-          const categorySubcats = getSubcategoriesForMainCategory(main_category.toString());
-          if (categorySubcats.length > 0) {
-            searchSubcategories = categorySubcats;
-            console.log(`[PRODUCTS API] Main category "${main_category}" expanded to subcategories:`, categorySubcats);
-          } else {
-       
-            searchSubcategories = [main_category.toString()];
-          }
-        }
-        
-        // If subcategory is provided (either with search OR multiple comma-separated values), use it directly
-        if (subcategory && subcategory.toString().trim() !== '') {
-          const subcats = subcategory.toString().split(',').map(s => s.trim()).filter(Boolean);
-          // If we already have categories from main_category expansion, replace them with specific subcategories
-          if (subcats.length > 0) {
-            searchSubcategories = subcats;
-            console.log(`[PRODUCTS API] Using specific subcategories:`, subcats);
-          }
-        }
-        
-      
-        if (search) {
-          searchSubcategories = [...searchSubcategories, search.toString()];
-        }
-
-        console.log(`[PRODUCTS API] Final search subcategories:`, searchSubcategories);
-
-       
-        let products = await storage.getProductsByCategoryAndSubcategory(
-          '', 
-          searchSubcategories.join(','),
-          '' 
-        );
-
-        console.log(`[PRODUCTS API] Found ${products.length} products from database`);
-
-        // Normalize stock status first
-        let filteredProducts = normalizeProductsStockStatus(products);
-        
-        // Apply additional filters if provided
-        
-        // Filter by price range
-        if (minPrice || maxPrice) {
-          filteredProducts = filteredProducts.filter(product => {
-            const price = parseFloat(product.price);
-            const min = minPrice ? parseFloat(minPrice.toString()) : 0;
-            const max = maxPrice ? parseFloat(maxPrice.toString()) : Infinity;
-            return price >= min && price <= max;
-          });
-        }
-        
-        // Filter by stock status
-        if (inStock === 'true') {
-          filteredProducts = filteredProducts.filter(product => product.inStock);
-        }
-        
-        // Filter by featured status  
-        if (featured === 'true') {
-          filteredProducts = filteredProducts.filter(product => product.featured);
-        }
-
-        // Filter by best seller status
-        if (bestSeller === 'true') {
-          filteredProducts = filteredProducts.filter(product => {
-            const rawBestSeller = product.isBestSeller ?? product.isbestseller;
-            const isBestSeller = typeof rawBestSeller === 'string'
-              ? ['true', '1', 'yes', 'enable'].includes(rawBestSeller.toLowerCase())
-              : !!rawBestSeller;
-            return isBestSeller;
-          });
-        }
-
-        // Additional server-side filtering for client multi-filters (flowerTypes, arrangements, colors)
-        // These query params are sometimes sent by the client but weren't applied previously —
-        // apply lightweight, case-insensitive substring matching on the product.category (which
-        // may be a JSON-string), subcategory, name, and description so multi-filter queries
-        // return the expected results.
-        const flowerTypesParam = (req.query.flowerTypes || '').toString();
-        const arrangementsParam = (req.query.arrangements || '').toString();
-        const colorsParam = (req.query.colors || '').toString();
-
-        const parseCategoryToArray = (cat: any) => {
-          if (!cat) return [];
-          try {
-            if (Array.isArray(cat)) return cat.map((c: any) => String(c).toLowerCase().trim());
-            if (typeof cat === 'string') {
-              const s = cat.trim();
-              if (s.startsWith('[') && s.endsWith(']')) {
-                const parsed = JSON.parse(s);
-                if (Array.isArray(parsed)) return parsed.map((c: any) => String(c).toLowerCase().trim());
-              }
-              // split on commas or semicolons as a fallback
-              return s.split(/[,;]+/).map((c: string) => c.replace(/["\[\]]+/g, '').toLowerCase().trim()).filter(Boolean);
-            }
-          } catch (e) {
-            return String(cat).replace(/["\[\]]+/g, '').split(/[,;]+/).map((c: string) => c.toLowerCase().trim()).filter(Boolean);
-          }
-          return [];
-        };
-
-        if (flowerTypesParam) {
-          const types = flowerTypesParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean);
-          if (types.length) {
-            const before = filteredProducts.length;
-            filteredProducts = filteredProducts.filter(prod => {
-              const cats = parseCategoryToArray((prod as any).category);
-              const nc = cats.join(' ');
-              const sub = prod.subcategory ? String(prod.subcategory).toLowerCase() : '';
-              const name = prod.name ? String(prod.name).toLowerCase() : '';
-              return types.some(t => nc.includes(t) || sub.includes(t) || name.includes(t));
-            });
-            console.log(`Products API: flowerTypes filter (${types.join(',')}) reduced ${before} -> ${filteredProducts.length}`);
-          }
-        }
-
-        if (arrangementsParam) {
-          const arrs = arrangementsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean);
-          if (arrs.length) {
-            const before = filteredProducts.length;
-            filteredProducts = filteredProducts.filter(prod => {
-              const cats = parseCategoryToArray((prod as any).category);
-              const nc = cats.join(' ');
-              const sub = prod.subcategory ? String(prod.subcategory).toLowerCase() : '';
-              const name = prod.name ? String(prod.name).toLowerCase() : '';
-              return arrs.some(a => nc.includes(a) || sub.includes(a) || name.includes(a));
-            });
-            console.log(`Products API: arrangements filter (${arrs.join(',')}) reduced ${before} -> ${filteredProducts.length}`);
-          }
-        }
-
-        if (colorsParam) {
-          const cols = colorsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean);
-          if (cols.length) {
-            const before = filteredProducts.length;
-            filteredProducts = filteredProducts.filter(prod => {
-              const color = prod.colour ? String(prod.colour).toLowerCase().trim() : '';
-              return cols.includes(color);
-            });
-            console.log(`Products API: colors filter (${cols.join(',')}) reduced ${before} -> ${filteredProducts.length}`);
-          }
-        }
-        
-            // If no products matched the strict category/subcategory search but the client
-            // requested multi-filters (flowerTypes/arrangements/colors), provide a graceful
-            // fallback: search across all products for any of the requested tokens (union).
-            // This avoids empty result pages when categories are stored in an unexpected
-            // format while preserving the regular behavior when the initial search returns hits.
-            if (filteredProducts.length === 0 && (flowerTypesParam || arrangementsParam || colorsParam)) {
-              try {
-                const allProducts = normalizeProductsStockStatus(await storage.getAllProducts());
-                // Ensure category key is present for backwards compatibility
-                const allProductsWithCategory = allProducts.map(p => ({ ...p, category: (p as any).main_category ?? (p as any).category ?? (p as any).subcategory }));
-                const types = flowerTypesParam ? flowerTypesParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean) : [];
-                const arrs = arrangementsParam ? arrangementsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean) : [];
-                const cols = colorsParam ? colorsParam.split(',').map(s => s.toLowerCase().trim()).filter(Boolean) : [];
-
-                const fallback = allProductsWithCategory.filter(prod => {
-                  const cats = parseCategoryToArray((prod as any).category).join(' ');
-                  const sub = prod.subcategory ? String(prod.subcategory).toLowerCase() : '';
-                  const name = prod.name ? String(prod.name).toLowerCase() : '';
-                  const color = prod.colour ? String(prod.colour).toLowerCase().trim() : '';
-
-                  const matchType = types.length ? types.some(t => cats.includes(t) || sub.includes(t) || name.includes(t)) : false;
-                  const matchArr = arrs.length ? arrs.some(a => cats.includes(a) || sub.includes(a) || name.includes(a)) : false;
-                  const matchCol = cols.length ? cols.includes(color) : false;
-
-                  return matchType || matchArr || matchCol;
-                });
-
-                console.log(`Products API: Fallback union search returned ${fallback.length} products for requested tokens`);
-                res.set('Cache-Control', 'no-store');
-                return res.status(200).json(fallback);
-              } catch (e) {
-                console.error('Products API: Fallback union search failed', e);
-                // proceed to return the empty filteredProducts below
-              }
-            }
-
-            console.log(`Products API: Found ${filteredProducts.length} products for main_category="${main_category}" subcategory="${subcategory}" search="${search}"`);
-            res.set('Cache-Control', 'no-store');
-            return res.status(200).json(filteredProducts);
-      }
-
-  // Otherwise get all products
-  let products = await storage.getAllProducts();
-  // Ensure category field exists for compatibility (derive from main_category or subcategory)
-  products = products.map(p => ({ ...p, category: (p as any).main_category ?? (p as any).category ?? (p as any).subcategory }));
-      
-  // Normalize stock status for all products
-  products = normalizeProductsStockStatus(products);
-      
-      // Apply best seller filter if specified
-      if (req.query.bestSeller === 'true') {
-        products = products.filter(product => {
-          const rawBestSeller = (product as any).isBestSeller ?? (product as any).isbestseller;
-          const isBestSeller = typeof rawBestSeller === 'string'
-            ? ['true', '1', 'yes', 'enable'].includes(rawBestSeller.toLowerCase())
-            : !!rawBestSeller;
-          return isBestSeller;
-        });
-      }
-      
-      console.log(`[PRODUCTS API] === PREPARING RESPONSE ===`);
-      console.log(`[PRODUCTS API] Total products found: ${products.length}`);
-      
-      // Return the actual products
-      res.set('Cache-Control', 'no-store');
-      return res.status(200).json(products);
-      
-    } catch (error) {
-      console.error(`[PRODUCTS API] === ERROR OCCURRED ===`);
-      console.error(`[PRODUCTS API] Error:`, error.message);
-      console.error(`[PRODUCTS API] Error stack:`, error.stack);
-      
-      const errorResponse = {
-        success: false,
-        message: "Failed to fetch products",
-        error: error.message
-      };
-      
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      
-      return res.status(500).send(JSON.stringify(errorResponse));
-    }
-  }); 
-
 
   app.get("/api/products/featured", async (req, res) => {
     try {
@@ -1753,6 +1120,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
   res.json(normalizedProducts);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch featured products" });
+    }
+  });
+
+  // Filter products by main_category, subcategory, name search
+  app.get("/api/products", async (req, res) => {
+    try {
+      const { main_category, subcategory, name, search } = req.query;
+      
+      // If both main_category and subcategory are provided
+      if (main_category && subcategory) {
+        const products = await storage.getProductsByMainCategoryAndSubcategory(main_category as string, subcategory as string);
+        const normalizedProducts = normalizeProductsStockStatus(products);
+        res.json(normalizedProducts);
+        return;
+      }
+      
+      // If only main_category is provided
+      if (main_category) {
+        const products = await storage.getProductsByMainCategory(main_category as string);
+        const normalizedProducts = normalizeProductsStockStatus(products);
+        res.json(normalizedProducts);
+        return;
+      }
+      
+      // If only subcategory is provided
+      if (subcategory) {
+        const products = await storage.getProductsBySubcategory(subcategory as string);
+        const normalizedProducts = normalizeProductsStockStatus(products);
+        res.json(normalizedProducts);
+        return;
+      }
+      
+      // If name/search is provided
+      if (name || search) {
+        const searchTerm = (name || search) as string;
+        const products = await storage.getProductsByNameSearch(searchTerm);
+        const normalizedProducts = normalizeProductsStockStatus(products);
+        res.json(normalizedProducts);
+        return;
+      }
+      
+      // Default: return all active products if no filters
+      const products = await storage.getAllProducts();
+      const normalizedProducts = normalizeProductsStockStatus(products);
+      res.json(normalizedProducts);
+      
+    } catch (error) {
+      console.error('Error in products API:', error);
+      res.status(500).json({ message: "Failed to fetch products" });
     }
   });
 
@@ -1773,6 +1189,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to fetch product" });
     }
   });
+
+   
 
   // Stock status endpoint for debugging and monitoring
   app.get("/api/products-stock-status", async (req, res) => {
