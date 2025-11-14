@@ -1189,12 +1189,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             subcategory::text = $1 
             OR subcategory::jsonb ? $1 
             OR subcategory ILIKE $2
+            OR LOWER(subcategory::text) LIKE LOWER($2)
+            OR (subcategory::jsonb)::text LIKE $2
           )
           ORDER BY id DESC
         `;
         queryParams = [subcategory, `%${subcategory}%`];
       }
-      // Scenario 3: Product name search
+      
       else if (name) {
         searchType = 'product_name';
         console.log(`[SEARCH API] Product name search for: "${name}"`);
@@ -1278,12 +1280,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           inStock: row.quantity > 0 || row.stockquantity > 0 || row.instock === true
         }));
 
+        // Always return a successful response, even with 0 products
         return res.status(200).json({
           success: true,
           searchType: searchType,
           [searchType === 'subcategory' ? 'subcategory' : 'searchTerm']: subcategory || name,
           totalProducts: products.length,
-          products: products
+          products: products,
+          message: products.length === 0 ? `No products found for ${searchType === 'subcategory' ? 'subcategory' : 'search term'}: ${subcategory || name}` : `Found ${products.length} product(s)`
         });
       }
       
@@ -1481,9 +1485,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`[PRODUCTS API] Request params:`, { main_category, subcategory, search });
 
-      // Handle specific subcategory filtering (when user clicks on a specific subcategory like "Tulips")
-      if (subcategory && !search) {
-        console.log(`[PRODUCTS API] Filtering by specific subcategory: "${subcategory}" under main_category: "${main_category}"`);
+      // Handle specific subcategory filtering (when user clicks on a SINGLE subcategory like "Tulips")
+      // Only use this path if subcategory doesn't contain commas (i.e., it's a single subcategory)
+      if (subcategory && !search && !subcategory.toString().includes(',')) {
+        console.log(`[PRODUCTS API] Filtering by single subcategory: "${subcategory}" under main_category: "${main_category}"`);
         
         // Use main_category parameter
         const mainCategoryValue = main_category ? main_category.toString() : '';
@@ -1507,37 +1512,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (main_category || (subcategory && subcategory.toString().trim() !== '') || search) {
         let searchSubcategories: string[] = [];
         
-        // If a main category is provided (e.g., "flower-types"), get all its subcategories
-        // Handle both undefined and empty string subcategories
+     
         if (main_category && (!subcategory || subcategory.toString().trim() === '')) {
           const categorySubcats = getSubcategoriesForMainCategory(main_category.toString());
           if (categorySubcats.length > 0) {
             searchSubcategories = categorySubcats;
             console.log(`[PRODUCTS API] Main category "${main_category}" expanded to subcategories:`, categorySubcats);
           } else {
-            // If not found in master data, treat as direct search term
+       
             searchSubcategories = [main_category.toString()];
           }
         }
         
-        // If a subcategory is provided with search, use it directly
-        if (subcategory && subcategory.toString().trim() !== '' && search) {
+        // If subcategory is provided (either with search OR multiple comma-separated values), use it directly
+        if (subcategory && subcategory.toString().trim() !== '') {
           const subcats = subcategory.toString().split(',').map(s => s.trim()).filter(Boolean);
-          searchSubcategories = [...searchSubcategories, ...subcats];
+          // If we already have categories from main_category expansion, replace them with specific subcategories
+          if (subcats.length > 0) {
+            searchSubcategories = subcats;
+            console.log(`[PRODUCTS API] Using specific subcategories:`, subcats);
+          }
         }
         
-        // If search is provided, add it to subcategories
+      
         if (search) {
           searchSubcategories = [...searchSubcategories, search.toString()];
         }
 
         console.log(`[PRODUCTS API] Final search subcategories:`, searchSubcategories);
 
-        // Get products using the enhanced subcategory search
+       
         let products = await storage.getProductsByCategoryAndSubcategory(
-          '', // Don't pass category to avoid double filtering
-          searchSubcategories.join(','), // Pass all subcategories as comma-separated
-          '' // Don't pass search separately
+          '', 
+          searchSubcategories.join(','),
+          '' 
         );
 
         console.log(`[PRODUCTS API] Found ${products.length} products from database`);
