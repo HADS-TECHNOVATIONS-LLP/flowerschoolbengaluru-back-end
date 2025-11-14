@@ -30,6 +30,7 @@ export const products = pgTable("products", {
   discountPercentage: integer("discount_percentage"), // Discount percentage (0-100)
   discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }), // Actual discount amount in currency
   category: text("category").notNull(),
+  subcategory: text("subcategory"), // Subcategory field for products
   image: text("image").notNull(),
   imagefirst: text("imagefirst"),
   imagesecond: text("imagesecond"), 
