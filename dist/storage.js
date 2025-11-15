@@ -570,6 +570,67 @@ export class MemStorage {
     async getProduct(id) {
         return this.products.get(id);
     }
+    async getProductsWithFilters(filters) {
+        // This is a simple in-memory implementation for development/testing
+        return Array.from(this.products.values()).filter(product => {
+            // Basic category filters
+            if (filters.main_category) {
+                const mainCategoryMatch = product.main_category?.includes?.(filters.main_category) ||
+                    product.category?.includes?.(filters.main_category);
+                if (!mainCategoryMatch)
+                    return false;
+            }
+            if (filters.subcategory) {
+                const subcategoryMatch = product.subcategory?.includes?.(filters.subcategory);
+                if (!subcategoryMatch)
+                    return false;
+            }
+            // Name search
+            if (filters.name) {
+                const nameMatch = product.name.toLowerCase().includes(filters.name.toLowerCase()) ||
+                    product.description.toLowerCase().includes(filters.name.toLowerCase());
+                if (!nameMatch)
+                    return false;
+            }
+            // Boolean filters
+            if (filters.inStock !== undefined && product.inStock !== filters.inStock)
+                return false;
+            if (filters.featured !== undefined && product.featured !== filters.featured)
+                return false;
+            if (filters.bestSeller !== undefined && product.isbestseller !== filters.bestSeller)
+                return false;
+            // Price filters
+            const price = parseFloat(product.price);
+            if (filters.minPrice !== undefined && price < filters.minPrice)
+                return false;
+            if (filters.maxPrice !== undefined && price > filters.maxPrice)
+                return false;
+            // Color filter
+            if (filters.colors && filters.colors.length > 0) {
+                const productColor = product.colour || '';
+                const colorMatch = filters.colors.some(color => productColor.toLowerCase().includes(color.toLowerCase()));
+                if (!colorMatch)
+                    return false;
+            }
+            // Flower types filter
+            if (filters.flowerTypes && filters.flowerTypes.length > 0) {
+                const flowerMatch = filters.flowerTypes.some(flower => product.name.toLowerCase().includes(flower.toLowerCase()) ||
+                    product.description.toLowerCase().includes(flower.toLowerCase()) ||
+                    product.subcategory?.toLowerCase().includes(flower.toLowerCase()));
+                if (!flowerMatch)
+                    return false;
+            }
+            // Arrangements filter
+            if (filters.arrangements && filters.arrangements.length > 0) {
+                const arrangementMatch = filters.arrangements.some(arrangement => product.name.toLowerCase().includes(arrangement.toLowerCase()) ||
+                    product.description.toLowerCase().includes(arrangement.toLowerCase()) ||
+                    product.subcategory?.toLowerCase().includes(arrangement.toLowerCase()));
+                if (!arrangementMatch)
+                    return false;
+            }
+            return true;
+        });
+    }
     async createProduct(insertProduct) {
         const id = randomUUID();
         // Normalize pricing: compute discountAmount and final price if discountPercentage provided
