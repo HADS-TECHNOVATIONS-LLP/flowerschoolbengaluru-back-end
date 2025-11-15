@@ -1021,7 +1021,53 @@ export async function registerRoutes(app) {
     // Filter products by main_category, subcategory, name search
     app.get("/api/products", async (req, res) => {
         try {
-            const { main_category, subcategory, name, search } = req.query;
+            const { main_category, subcategory, name, search, inStock, featured, bestSeller, minPrice, maxPrice, colors, flowerTypes, arrangements } = req.query;
+            // Log the filter parameters for debugging
+            console.log('Products API called with filters:', {
+                main_category,
+                subcategory,
+                name,
+                search,
+                inStock,
+                featured,
+                bestSeller,
+                minPrice,
+                maxPrice,
+                colors,
+                flowerTypes,
+                arrangements
+            });
+            // Check if we have any advanced filter parameters
+            const hasAdvancedFilters = inStock !== undefined || featured !== undefined || bestSeller !== undefined ||
+                minPrice !== undefined || maxPrice !== undefined || colors !== undefined ||
+                flowerTypes !== undefined || arrangements !== undefined;
+            console.log('Advanced filters check:', { hasAdvancedFilters, inStock, featured, bestSeller, minPrice, maxPrice, colors, flowerTypes, arrangements });
+            // If we have advanced filters, use the filtered query function
+            if (hasAdvancedFilters) {
+                console.log('Using advanced filters path - getProductsWithFilters');
+                const filterParams = {
+                    name: (name || search),
+                    inStock: inStock !== undefined ? inStock === 'true' : undefined,
+                    featured: featured !== undefined ? featured === 'true' : undefined,
+                    bestSeller: bestSeller !== undefined ? bestSeller === 'true' : undefined,
+                    minPrice: minPrice ? parseFloat(minPrice) : undefined,
+                    maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
+                    colors: colors ? colors.split(',').map(c => c.trim()) : [],
+                    flowerTypes: flowerTypes ? flowerTypes.split(',').map(f => f.trim()) : [],
+                    arrangements: arrangements ? arrangements.split(',').map(a => a.trim()) : []
+                };
+                console.log('Filter params being passed to getProductsWithFilters:', filterParams);
+                try {
+                    const products = await storage.getProductsWithFilters(filterParams);
+                    const normalizedProducts = normalizeProductsStockStatus(products);
+                    res.json(normalizedProducts);
+                    return;
+                }
+                catch (filterError) {
+                    console.error('Error using advanced filters, falling back to basic query:', filterError);
+                    // Fall through to basic query handling below
+                }
+            }
             // If both main_category and subcategory are provided
             if (main_category && subcategory) {
                 const products = await storage.getProductsByMainCategoryAndSubcategory(main_category, subcategory);

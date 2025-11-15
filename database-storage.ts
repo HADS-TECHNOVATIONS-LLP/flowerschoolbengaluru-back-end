@@ -1053,6 +1053,187 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
     }
   }
 
+  async getProductsWithFilters(filters: {
+    name?: string;
+    inStock?: boolean;
+    featured?: boolean;
+    bestSeller?: boolean;
+    minPrice?: number;
+    maxPrice?: number;
+    colors?: string[];
+    flowerTypes?: string[];
+    arrangements?: string[];
+  }): Promise<Product[]> {
+    try {
+      console.log('getProductsWithFilters called with:', filters);
+      
+      // Normalize filter values to handle common variations
+      if (filters.flowerTypes) {
+        filters.flowerTypes = filters.flowerTypes.map(f => {
+          // Handle common pluralization and case issues
+          const normalized = f.toLowerCase().trim();
+          if (normalized === 'lily' || normalized === 'lilies') return 'Lilies';
+          if (normalized === 'rose' || normalized === 'roses') return 'Roses';  
+          if (normalized === 'tulip' || normalized === 'tulips') return 'Tulips';
+          if (normalized === 'orchid' || normalized === 'orchids') return 'Orchids';
+          if (normalized === 'sunflower' || normalized === 'sunflowers') return 'Sunflowers';
+          if (normalized === 'carnation' || normalized === 'carnations') return 'Carnations';
+          if (normalized === 'mixed flowers' || normalized === 'mixed flowers') return 'Mixed Flowers';
+       
+
+
+          // Return original value if no normalization needed
+          return f;
+        });
+        console.log('Normalized flowerTypes:', filters.flowerTypes);
+      }
+
+      if (filters.arrangements) {
+        filters.arrangements = filters.arrangements.map(a => {
+          const normalized = a.toLowerCase().trim();
+          if (normalized === 'hand-tied bouquets' || normalized === 'hand-tied bouquet') return 'Hand-Tied Bouquets';
+          if (normalized === 'centerpieces' || normalized === 'centerpiece') return 'Centerpieces';    
+          if (normalized === 'vase arrangements' || normalized === 'vase arrangement') return 'Vase Arrangements';
+          if (normalized === 'bouquets' || normalized === 'bouquet') return 'Bouquets';
+          if (normalized === 'flower box' || normalized === 'flowerbox') return 'Flower Box';
+          if (normalized === 'flower basket' || normalized === 'flowerbasket') return 'Flower Basket';
+          // Return original value if no normalization needed
+          return a;
+        });
+        console.log('Normalized arrangements:', filters.arrangements);
+      }
+
+      // Start building the base query
+      let query = `
+        SELECT *
+        FROM bouquetbar.products
+        WHERE isactive = true
+      `;
+      
+      const queryParams: any[] = [];
+      let paramIndex = 1;
+      
+      
+      // Add name search filter
+      if (filters.name) {
+        query += ` AND (
+          name ILIKE $${paramIndex} OR
+          description ILIKE $${paramIndex + 1}
+        )`;
+        const namePattern = `%${filters.name}%`;
+        queryParams.push(namePattern, namePattern);
+        paramIndex += 2;
+      }
+      
+      // Add inStock filter
+      if (filters.inStock !== undefined) {
+        query += ` AND \"inStock\" = $${paramIndex}`;
+        queryParams.push(filters.inStock);
+        paramIndex += 1;
+      }
+      
+      // Add featured filter
+      if (filters.featured !== undefined) {
+        query += ` AND featured = $${paramIndex}`;
+        queryParams.push(filters.featured);
+        paramIndex += 1;
+      }
+      
+      // Add bestSeller filter
+      if (filters.bestSeller !== undefined) {
+        query += ` AND isbestseller = $${paramIndex}`;
+        queryParams.push(filters.bestSeller);
+        paramIndex += 1;
+      }
+      
+      // Add price range filters
+      if (filters.minPrice !== undefined) {
+        query += ` AND price::numeric >= $${paramIndex}`;
+        queryParams.push(filters.minPrice);
+        paramIndex += 1;
+      }
+      
+      if (filters.maxPrice !== undefined) {
+        query += ` AND price::numeric <= $${paramIndex}`;
+        queryParams.push(filters.maxPrice);
+        paramIndex += 1;
+      }
+      
+      // Add colors filter
+      if (filters.colors && filters.colors.length > 0) {
+        const colorConditions = filters.colors.map((color) => {
+          const condition = `colour ILIKE $${paramIndex}`;
+          queryParams.push(`%${color}%`);
+          paramIndex += 1;
+          return condition;
+        });
+        query += ` AND (${colorConditions.join(' OR ')})`;
+      }
+      
+      // Add flowerTypes filter (simple ILIKE approach that works)
+      if (filters.flowerTypes && filters.flowerTypes.length > 0) {
+        console.log('Processing flowerTypes:', filters.flowerTypes);
+        const flowerConditions = filters.flowerTypes.map((flower) => {
+          const condition = `(
+            subcategory ILIKE $${paramIndex} OR
+            main_category ILIKE $${paramIndex + 1}
+          )`;
+          const flowerPattern = `%${flower}%`;
+          console.log(`Adding flower filter for "${flower}" with pattern "${flowerPattern}"`);
+          queryParams.push(flowerPattern, flowerPattern);
+          paramIndex += 2;
+          return condition;
+        });
+        query += ` AND (${flowerConditions.join(' OR ')})`;
+        console.log('FlowerTypes SQL conditions:', flowerConditions.join(' OR '));
+      }
+      
+      // Add arrangements filter (simple ILIKE approach that works)
+      if (filters.arrangements && filters.arrangements.length > 0) {
+        const arrangementConditions = filters.arrangements.map((arrangement) => {
+          const condition = `(
+            subcategory ILIKE $${paramIndex} OR
+            main_category ILIKE $${paramIndex + 1}
+          )`;
+          const arrangementPattern = `%${arrangement}%`;
+          queryParams.push(arrangementPattern, arrangementPattern);
+          paramIndex += 2;
+          return condition;
+        });
+        query += ` AND (${arrangementConditions.join(' OR ')})`;
+      }
+      
+      // Add ordering
+      query += ` ORDER BY createdat DESC`;
+      
+      console.log('Executing getProductsWithFilters query:', query);
+      console.log('Query parameters:', queryParams);
+      console.log('Parameter count check - paramIndex:', paramIndex, 'queryParams.length:', queryParams.length);
+      
+      // For debugging: Log a simplified version of the query for flowerTypes
+      if (filters.flowerTypes && filters.flowerTypes.length > 0) {
+        console.log('DEBUG: Manual test query would be:');
+        console.log(`SELECT * FROM bouquetbar.products WHERE isactive = true AND (subcategory ILIKE '%${filters.flowerTypes[0]}%' OR main_category ILIKE '%${filters.flowerTypes[0]}%')`);
+      }
+      
+      const result = await db.query(query, queryParams);
+      console.log('Query Result:', result.rows?.length ?? 0, 'products found');
+      
+      // Debug: Show first few results if any
+      if (result.rows && result.rows.length > 0) {
+        console.log('Sample results:');
+        result.rows.slice(0, 3).forEach((row, i) => {
+          console.log(`  ${i + 1}. ${row.name} | subcategory: ${row.subcategory} | main_category: ${row.main_category}`);
+        });
+      }
+      
+      return result.rows || [];
+    } catch (error) {
+      console.error('Error in getProductsWithFilters:', error);
+      return [];
+    }
+  }
+
   async getDashboardData(): Promise < any > {
   try {
     const query = `
