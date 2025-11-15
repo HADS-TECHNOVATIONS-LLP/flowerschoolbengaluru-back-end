@@ -78,6 +78,7 @@ export class MemStorage {
                 discountPercentage: 0,
                 discountAmount: "0.00",
                 category: "roses",
+                subcategory: "roses",
                 image: "https://images.unsplash.com/photo-1563241527-3004b7be0ffd?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
                 imagefirst: "https://images.unsplash.com/photo-1563241527-3004b7be0ffd?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&h=600",
                 imagesecond: "",
@@ -102,6 +103,7 @@ export class MemStorage {
                 discountPercentage: 0,
                 discountAmount: "0.00",
                 category: "orchids",
+                subcategory: "orchids",
                 image: "https://images.unsplash.com/photo-1582794543139-8ac9cb0f7b11?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
                 imagefirst: "",
                 imagesecond: "",
@@ -126,6 +128,7 @@ export class MemStorage {
                 discountPercentage: 0,
                 discountAmount: "0.00",
                 category: "wedding",
+                subcategory: "wedding",
                 image: "https://images.unsplash.com/photo-1606800052052-a08af7148866?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
                 imagefirst: "",
                 imagesecond: "",
@@ -150,6 +153,7 @@ export class MemStorage {
                 discountPercentage: 0,
                 discountAmount: "0.00",
                 category: "seasonal",
+                subcategory: "seasonal",
                 image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
                 imagefirst: "",
                 imagesecond: "",
@@ -174,6 +178,7 @@ export class MemStorage {
                 discountPercentage: 0,
                 discountAmount: "0.00",
                 category: "roses",
+                subcategory: "roses",
                 image: "https://images.unsplash.com/photo-1560717845-968823efbee1?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
                 imagefirst: "",
                 imagesecond: "",
@@ -533,6 +538,35 @@ export class MemStorage {
         }
         return results;
     }
+    async getProductsByMainCategory(mainCategory) {
+        return Array.from(this.products.values()).filter(product => product.main_category === mainCategory);
+    }
+    async getProductsBySubcategory(subcategory) {
+        return Array.from(this.products.values()).filter(product => product.subcategory === subcategory);
+    }
+    async getProductsByNameSearch(searchTerm) {
+        const searchLower = searchTerm.toLowerCase();
+        return Array.from(this.products.values()).filter(product => product.name.toLowerCase().includes(searchLower) ||
+            product.description.toLowerCase().includes(searchLower) ||
+            product.subcategory?.toLowerCase().includes(searchLower) ||
+            product.main_category?.toLowerCase().includes(searchLower));
+    }
+    async getProductsByMainCategoryAndSubcategory(mainCategory, subcategory) {
+        const mainCategoryLower = mainCategory.toLowerCase();
+        const subcategoryLower = subcategory.toLowerCase();
+        return Array.from(this.products.values()).filter(product => {
+            const productMainCategory = product.main_category;
+            const productSubcategory = product.subcategory;
+            // Handle both string and array formats
+            const matchesMainCategory = Array.isArray(productMainCategory)
+                ? productMainCategory.some(cat => cat.toLowerCase().includes(mainCategoryLower))
+                : productMainCategory?.toLowerCase().includes(mainCategoryLower);
+            const matchesSubcategory = Array.isArray(productSubcategory)
+                ? productSubcategory.some(cat => cat.toLowerCase().includes(subcategoryLower))
+                : productSubcategory?.toLowerCase().includes(subcategoryLower);
+            return matchesMainCategory && matchesSubcategory;
+        });
+    }
     async getProduct(id) {
         return this.products.get(id);
     }
@@ -554,6 +588,7 @@ export class MemStorage {
             discountPercentage: parsedPct ?? 0,
             discountAmount: discountAmountNum.toFixed(2),
             category: insertProduct.category,
+            subcategory: insertProduct.subcategory ?? insertProduct.category,
             image: insertProduct.image,
             imagefirst: insertProduct.imagefirst ?? insertProduct.image,
             imagesecond: insertProduct.imagesecond ?? "",
