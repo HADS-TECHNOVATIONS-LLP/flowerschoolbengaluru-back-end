@@ -3926,7 +3926,7 @@ app.get("/api/categoryuserdata", async (req, res) => {
 
         const defaultOptions = [
           {
-            name: "Standard Delivery",
+            name: "Next Day Delivery",
             description: "1-4 business days delivery",
             estimatedDays: "1-4 business days",
             price: "50.00",
