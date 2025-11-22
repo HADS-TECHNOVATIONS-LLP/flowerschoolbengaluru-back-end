@@ -392,7 +392,7 @@ export class MemStorage {
         const sampleDeliveryOptions = [
             {
                 id: "1",
-                name: "Next Day Delivery",
+                name: "Standard Delivery",
                 description: "Free delivery within 3-5 business days",
                 estimatedDays: "3-5 business days",
                 price: "0.00",
@@ -805,6 +805,8 @@ export class MemStorage {
             couponCode: insertOrder.couponCode ?? null,
             shippingAddressId: insertOrder.shippingAddressId ?? null,
             deliveryOptionId: insertOrder.deliveryOptionId ?? null,
+            delivery_option: insertOrder.delivery_option ?? '',
+            distance: insertOrder.distance ?? 0,
             deliveryCharge: insertOrder.deliveryCharge ?? "0.00",
             discountAmount: insertOrder.discountAmount ?? "0.00",
             paymentCharges: insertOrder.paymentCharges ?? "0.00"

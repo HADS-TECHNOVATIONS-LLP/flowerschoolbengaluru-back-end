@@ -1673,6 +1673,8 @@ ORDER BY B.createdat DESC; `;
       deliverydate,
       subtotal,
       deliveryoptionid,
+      delivery_option,
+      distance,
       deliverycharge,
       couponcode,
       discountamount,
@@ -1701,6 +1703,8 @@ ORDER BY B.createdat DESC; `;
       '${order.deliveryDate ?? ''}',
       ${order.subtotal},
       '${order.deliveryOptionId ?? ''}',
+      '${order.delivery_option ?? ''}',
+      ${order.distance ?? 0},
       ${order.deliveryCharge ?? 0},
       '${order.couponCode ?? ''}',
       ${order.discountAmount ?? 0},
@@ -2465,7 +2469,13 @@ ORDER BY B.createdat DESC; `;
       ORDER BY sortorder;
     `;
         const result = await db.query(query);
-        return result.rows;
+        // Map 'Standard Delivery' to 'Next Day Delivery'
+        return result.rows.map(option => {
+            if (option.name && option.name.trim().toLowerCase() === 'standard delivery') {
+                return { ...option, name: 'Next Day Delivery' };
+            }
+            return option;
+        });
     }
     async getDeliveryOption(id) {
         const query = `
