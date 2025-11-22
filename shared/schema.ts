@@ -84,6 +84,8 @@ export const orders = pgTable("orders", {
   items: jsonb("items").notNull(),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
   deliveryOptionId: varchar("delivery_option_id").references(() => deliveryOptions.id),
+  delivery_option: varchar("delivery_option"), // Added for custom delivery option name
+  distance: decimal("distance", { precision: 10, scale: 2 }).default("0"), // Added for delivery distance
   deliveryCharge: decimal("delivery_charge", { precision: 10, scale: 2 }).notNull().default("0"),
   couponCode: varchar("coupon_code"),
   discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }).default("0"),
@@ -270,6 +272,8 @@ export const orderPlacementSchema = z.object({
   
   // Delivery information
   deliveryOptionId: z.string().min(1, "Delivery option is required"),
+  delivery_option: z.string().default(''),
+  distance: z.number().default(0),
   deliveryCharge: z.number().min(0, "Delivery charge cannot be negative"),
   deliveryDate: z.string().datetime().optional(),
   
