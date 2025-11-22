@@ -1088,6 +1088,8 @@ export class MemStorage implements IStorage {
       couponCode: insertOrder.couponCode ?? null,
       shippingAddressId: insertOrder.shippingAddressId ?? null,
       deliveryOptionId: insertOrder.deliveryOptionId ?? null,
+      delivery_option: (insertOrder as any).delivery_option ?? '',
+      distance: (insertOrder as any).distance ?? 0,
       deliveryCharge: (insertOrder.deliveryCharge as string) ?? "0.00",
       discountAmount: (insertOrder.discountAmount as string) ?? "0.00",
       paymentCharges: (insertOrder.paymentCharges as string) ?? "0.00"

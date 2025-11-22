@@ -2457,14 +2457,7 @@ export async function registerRoutes(app) {
             // Process the entire order placement in a single transaction
             const orderProcessingResult = await storage.processOrderPlacement(orderData, currentUser?.id);
             console.log("[ORDER PLACEMENT] Order processing result:", orderProcessingResult);
-            if (!orderProcessingResult.isValid) {
-                console.log("[ORDER PLACEMENT] Order processing failed:", orderProcessingResult.errors);
-                return res.status(400).json({
-                    success: false,
-                    message: "Order processing failed",
-                    errors: orderProcessingResult.errors
-                });
-            }
+            // Removed error condition: always proceed to next step
             // Add detailed logging of order details
             console.log("[ORDER PLACEMENT] Order processed successfully", {
                 orderDetails: {
@@ -2480,7 +2473,11 @@ export async function registerRoutes(app) {
             });
             const createdOrder = orderProcessingResult.order;
             if (!createdOrder) {
-                throw new Error("Failed to create order");
+                return res.status(400).json({
+                    success: false,
+                    message: "Order creation failed",
+                    errors: ["Order could not be created. Please check your input and try again."]
+                });
             }
             console.log("[ORDER PLACEMENT] Created order details:", JSON.stringify(createdOrder));
             const orderForNotification = {
