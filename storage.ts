@@ -99,9 +99,8 @@ export interface IStorage {
     errors?: string[];
     validatedItems?: Array<{ productId: string; productName: string; quantity: number; unitPrice: number; totalPrice: number }>;
   }>;
-  calculateOrderPricing(subtotal: number, deliveryOptionId: string, couponCode?: string, paymentMethod?: string): Promise<{
+  calculateOrderPricing(subtotal: number, deliveryOptionId: string, code?: string, paymentMethod?: string): Promise<{
     deliveryCharge: number;
-    discountAmount: number;
     paymentCharges: number;
     total: number;
   }>;
@@ -170,7 +169,7 @@ export interface IStorage {
   updateEventPricing(pricing: any): Promise<any>;
   
   // Transactional order processing methods
-  createOrderWithTransaction(validatedOrder: InsertOrder, couponCode?: string, userId?: string): Promise<Order>;
+  createOrderWithTransaction(validatedOrder: InsertOrder, code?: string, userId?: string): Promise<Order>;
   processOrderPlacement(orderData: OrderPlacement, userId?: string): Promise<{
     isValid: boolean;
     errors?: string[];
@@ -178,7 +177,7 @@ export interface IStorage {
     calculatedPricing?: {
       subtotal: number;
       deliveryCharge: number;
-      discountAmount: number;
+      // ...existing code...
       paymentCharges: number;
       total: number;
     };
@@ -263,136 +262,9 @@ export class MemStorage implements IStorage {
   }
 
   private initializeData() {
-    // Initialize products
-    const sampleProducts: Product[] = [
-        {
-          id: "1",
-          name: "Premium Red Roses",
-          description: "12 fresh red roses with premium wrapping",
-          price: "1299.00",
-          originalPrice: "1299.00",
-          discountPercentage: 0,
-          discountAmount: "0.00",
-          category: "roses",
-          subcategory: "roses",
-          image: "https://images.unsplash.com/photo-1563241527-3004b7be0ffd?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
-          imagefirst: "https://images.unsplash.com/photo-1563241527-3004b7be0ffd?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&h=600",
-          imagesecond: "",
-          imagethirder: "",
-          imagefoure: "",
-          imagefive: "",
-          stockQuantity: 25,
-          inStock: true,
-          featured: true,
-          isbestseller: false,
-          iscustom: false,
-          colour: "",
-          discountsOffers: false,
-          createdAt: new Date(),
-        },
-      {
-        id: "2",
-        name: "White Orchid Elegance",
-        description: "Pristine white orchids in ceramic pot",
-        price: "2499.00",
-        originalPrice: "2499.00",
-        discountPercentage: 0,
-        discountAmount: "0.00",
-        category: "orchids",
-        subcategory: "orchids",
-        image: "https://images.unsplash.com/photo-1582794543139-8ac9cb0f7b11?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
-        imagefirst: "",
-        imagesecond: "",
-        imagethirder: "",
-        imagefoure: "",
-        imagefive: "",
-        stockQuantity: 15,
-        inStock: true,
-        featured: true,
-        isbestseller: false,
-        iscustom: false,
-        colour: "",
-        discountsOffers: false,
-        createdAt: new Date(),
-      },
-      {
-        id: "3",
-        name: "Bridal Bliss Bouquet",
-        description: "Mixed roses and lilies for your special day",
-        price: "3999.00",
-        originalPrice: "3999.00",
-        discountPercentage: 0,
-        discountAmount: "0.00",
-        category: "wedding",
-        subcategory: "wedding",
-        image: "https://images.unsplash.com/photo-1606800052052-a08af7148866?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
-        imagefirst: "",
-        imagesecond: "",
-        imagethirder: "",
-        imagefoure: "",
-        imagefive: "",
-        stockQuantity: 8,
-        inStock: true,
-        featured: true,
-        isbestseller: false,
-        iscustom: false,
-        colour: "",
-        discountsOffers: false,
-        createdAt: new Date(),
-      },
-      {
-        id: "4",
-        name: "Seasonal Surprise",
-        description: "Sunflowers and seasonal mix bouquet",
-        price: "899.00",
-        originalPrice: "899.00",
-        discountPercentage: 0,
-        discountAmount: "0.00",
-        category: "seasonal",
-        subcategory: "seasonal",
-        image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
-        imagefirst: "",
-        imagesecond: "",
-        imagethirder: "",
-        imagefoure: "",
-        imagefive: "",
-        stockQuantity: 20,
-        inStock: true,
-        featured: true,
-        isbestseller: false,
-        iscustom: false,
-        colour: "",
-        discountsOffers: false,
-        createdAt: new Date(),
-      },
-      {
-        id: "5",
-        name: "Mixed Roses",
-        description: "Beautiful mixed variety roses in vibrant colors",
-        price: "1599.00",
-        originalPrice: "1599.00",
-        discountPercentage: 0,
-        discountAmount: "0.00",
-        category: "roses",
-        subcategory: "roses",
-        image: "https://images.unsplash.com/photo-1560717845-968823efbee1?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300",
-        imagefirst: "",
-        imagesecond: "",
-        imagethirder: "",
-        imagefoure: "",
-        imagefive: "",
-        stockQuantity: 15,
-        inStock: true,
-        featured: true,
-        isbestseller: true,
-        iscustom: false,
-        colour: "",
-        discountsOffers: false,
-        createdAt: new Date(),
-      },
-    ];
+  
 
-    sampleProducts.forEach(product => this.products.set(product.id, product));
+   
 
     // Initialize courses
     const sampleCourses: Course[] = [
@@ -889,22 +761,21 @@ export class MemStorage implements IStorage {
 
   async createProduct(insertProduct: InsertProduct): Promise<Product> {
     const id = randomUUID();
-    // Normalize pricing: compute discountAmount and final price if discountPercentage provided
+    // Normalize pricing: compute discount_amount and final price if discountPercentage provided
     const parsedPrice = insertProduct.price ? Number(insertProduct.price) : 0;
     const parsedOriginal = insertProduct.originalPrice ? Number(insertProduct.originalPrice) : parsedPrice;
     const parsedPct = typeof insertProduct.discountPercentage === 'number' ? insertProduct.discountPercentage : 0;
-    const discountAmountNum = +(parsedOriginal * (parsedPct / 100));
-    const finalPriceNum = +(parsedOriginal - discountAmountNum);
+    const discount_amountNum = +(parsedOriginal * (parsedPct / 100));
+    const finalPriceNum = +(parsedOriginal - discount_amountNum);
 
     const product: Product = { 
       id, 
       name: insertProduct.name as string,
       description: insertProduct.description as string,
       price: finalPriceNum.toFixed(2),
-      // Provide sensible defaults for optional/DB fields so Product matches the inferred schema
       originalPrice: parsedOriginal.toFixed(2),
       discountPercentage: parsedPct ?? 0,
-      discountAmount: discountAmountNum.toFixed(2),
+      discountAmount: discount_amountNum.toFixed(2),
       category: insertProduct.category as string,
       subcategory: (insertProduct as any).subcategory as string ?? insertProduct.category as string,
       image: insertProduct.image as string,
@@ -920,6 +791,7 @@ export class MemStorage implements IStorage {
       iscustom: (insertProduct.iscustom as boolean) ?? false,
       colour: (insertProduct.colour as string) ?? "",
       discountsOffers: (insertProduct.discountsOffers as boolean) ?? false,
+      filter: "",
       createdAt: new Date()
     };
     this.products.set(id, product);
@@ -1085,14 +957,14 @@ export class MemStorage implements IStorage {
       deliveryDate: insertOrder.deliveryDate ? new Date(insertOrder.deliveryDate as string | number | Date) : null,
       estimatedDeliveryDate: insertOrder.estimatedDeliveryDate ? new Date(insertOrder.estimatedDeliveryDate as string | number | Date) : null,
       paymentTransactionId: insertOrder.paymentTransactionId ?? null,
-      couponCode: insertOrder.couponCode ?? null,
       shippingAddressId: insertOrder.shippingAddressId ?? null,
       deliveryOptionId: insertOrder.deliveryOptionId ?? null,
       delivery_option: (insertOrder as any).delivery_option ?? '',
       distance: (insertOrder as any).distance ?? 0,
       deliveryCharge: (insertOrder.deliveryCharge as string) ?? "0.00",
-      discountAmount: (insertOrder.discountAmount as string) ?? "0.00",
-      paymentCharges: (insertOrder.paymentCharges as string) ?? "0.00"
+      paymentCharges: (insertOrder.paymentCharges as string) ?? "0.00",
+      discountAmount: "0.00",
+      couponCode: "",
     };
     this.orders.set(id, order);
     return order;
@@ -1183,9 +1055,9 @@ export class MemStorage implements IStorage {
     };
   }
 
-  async calculateOrderPricing(subtotal: number, deliveryOptionId: string, couponCode?: string, paymentMethod?: string): Promise<{
+  async calculateOrderPricing(subtotal: number, deliveryOptionId: string, code?: string, paymentMethod?: string): Promise<{
     deliveryCharge: number;
-    discountAmount: number;
+    // ...existing code...
     paymentCharges: number;
     total: number;
   }> {
@@ -1195,19 +1067,7 @@ export class MemStorage implements IStorage {
 
     // Calculate discount
     let discountAmount = 0;
-    if (couponCode) {
-      const coupon = Array.from(this.coupons.values()).find(c => c.code === couponCode && c.isActive);
-      if (coupon) {
-        if (coupon.type === "percentage") {
-          discountAmount = (subtotal * parseFloat(coupon.value)) / 100;
-          if (coupon.maxDiscount) {
-            discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
-          }
-        } else if (coupon.type === "fixed") {
-          discountAmount = parseFloat(coupon.value);
-        }
-      }
-    }
+ 
 
     // Calculate payment charges
     let paymentCharges = 0;
@@ -1219,7 +1079,7 @@ export class MemStorage implements IStorage {
 
     return {
       deliveryCharge,
-      discountAmount,
+   
       paymentCharges,
       total
     };
@@ -1280,7 +1140,7 @@ export class MemStorage implements IStorage {
     console.log("[ORDER VALIDATION] Pricing comparison:");
     console.log("- Subtotal:", orderData.subtotal, "vs calculated:", orderData.subtotal);
     console.log("- Delivery charge:", orderData.deliveryCharge, "vs calculated:", calculatedPricing.deliveryCharge);
-    console.log("- Discount amount:", orderData.discountAmount, "vs calculated:", calculatedPricing.discountAmount);
+
     console.log("- Payment charges:", orderData.paymentCharges || 0, "vs calculated:", calculatedPricing.paymentCharges);
     console.log("- Total:", orderData.total, "vs calculated:", calculatedPricing.total);
     console.log("- Payment method:", orderData.paymentMethod);
@@ -1290,9 +1150,7 @@ export class MemStorage implements IStorage {
     if (Math.abs(calculatedPricing.deliveryCharge - orderData.deliveryCharge) > pricingTolerance) {
       errors.push("Delivery charge mismatch");
     }
-    if (Math.abs(calculatedPricing.discountAmount - orderData.discountAmount) > pricingTolerance) {
-      errors.push("Discount amount mismatch");
-    }
+   
     if (Math.abs(calculatedPricing.total - orderData.total) > pricingTolerance) {
       errors.push("Total amount mismatch");
     }
@@ -1314,7 +1172,8 @@ export class MemStorage implements IStorage {
       deliveryOptionId: orderData.deliveryOptionId,
       deliveryCharge: calculatedPricing.deliveryCharge.toString(),
       couponCode: orderData.couponCode,
-      discountAmount: calculatedPricing.discountAmount.toString(),
+    
+      // ...existing code...
       paymentMethod: orderData.paymentMethod,
       paymentCharges: calculatedPricing.paymentCharges.toString(),
       total: calculatedPricing.total.toString(),
@@ -1329,10 +1188,7 @@ export class MemStorage implements IStorage {
     return {
       isValid: true,
       validatedOrder,
-      calculatedPricing: {
-        subtotal: orderData.subtotal,
-        ...calculatedPricing
-      }
+     
     };
   }
 

@@ -44,6 +44,7 @@ export const products = pgTable("products", {
   iscustom: boolean("iscustom").default(false),
   colour: text("colour"),
   discountsOffers: boolean("discounts_offers").default(false),
+  filter: text("filter"), // Add filter field for normalized filter array (as JSON string)
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -291,9 +292,13 @@ export const orderPlacementSchema = z.object({
   deliveryAddress: z.string().optional(), // For guest users or custom address
   
   // Coupon information
-  couponCode: z.string().optional(),
-  discountAmount: z.number().min(0, "Discount amount cannot be negative").default(0),
-  
+    code: z.string().optional(),
+  coupon_id: z.string().optional(),
+  coupon_type: z.string().optional(),
+  coupon_value: z.number().optional(),
+  coupon_description: z.string().optional(),
+  discount_amount: z.number().min(0, "Discount amount cannot be negative").default(0),
+  final_amount: z.number().optional(),
   // Final total
   total: z.number().positive("Total must be positive"),
   
@@ -398,7 +403,7 @@ export type Course = typeof courses.$inferSelect;
 export type InsertCart = z.infer<typeof insertCartSchema>;
 export type Cart = typeof carts.$inferSelect;
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
-export type Order = typeof orders.$inferSelect;
+export type Order = typeof orders.$inferSelect & { code?: string; couponCode?: string };
 export type InsertEnrollment = z.infer<typeof insertEnrollmentSchema>;
 export type Enrollment = typeof enrollments.$inferSelect;
 export type InsertTestimonial = z.infer<typeof insertTestimonialSchema>;
@@ -417,7 +422,7 @@ export type InsertOrderStatusHistory = z.infer<typeof insertOrderStatusHistorySc
 export type OrderStatusHistory = typeof orderStatusHistory.$inferSelect;
 export type ValidateCoupon = z.infer<typeof validateCouponSchema>;
 export type AddressValidation = z.infer<typeof addressValidationSchema>;
-export type OrderPlacement = z.infer<typeof orderPlacementSchema>;
+export type OrderPlacement = z.infer<typeof orderPlacementSchema> & { code?: string; couponCode?: string };
 
 // Event types
 export const events = pgTable("events", {

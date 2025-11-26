@@ -932,93 +932,255 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
   return result.rows;
 }
 
-  async getProductsByMainCategory(mainCategory: string): Promise<Product[]> {
-    try {
-      const query = `
-        SELECT *
-        FROM bouquetbar.products
-        WHERE isactive = true
-          AND "inStock" = true
-          AND (
-            main_category::jsonb ? $1 OR
-            main_category::text ILIKE $2
-          )
-        ORDER BY createdat DESC;
-      `;
-      const searchPattern = `%${mainCategory}%`;
-      console.log('Executing getProductsByMainCategory query:', query, 'with main_category:', mainCategory);
-      const result = await db.query(query, [mainCategory, searchPattern]);
-      console.log('Query Result:', result.rows?.length ?? 0, 'products found');
-      return result.rows || [];
-    } catch (error) {
-      console.error('Error in getProductsByMainCategory:', error);
-      return [];
-    }
-  }
+async getProductsByMainCategory(mainCategory: string): Promise<Product[]> {
+  try {
+    const query = `
+      SELECT *
+      FROM bouquetbar.products
+      WHERE isactive = true
+        AND "inStock" = true
+        AND main_category ILIKE $1
+      ORDER BY createdat DESC;
+    `;
 
-  async getProductsBySubcategory(subcategory: string): Promise<Product[]> {
-    try {
-      const query = `
-        SELECT *
-        FROM bouquetbar.products
-        WHERE isactive = true
-          AND "inStock" = true
-          AND (
-            subcategory::jsonb ? $1 OR
-            subcategory::text ILIKE $2
-          )
-        ORDER BY createdat DESC;
-      `;
-      const searchPattern = `%${subcategory}%`;
-      console.log('Executing getProductsBySubcategory query:', query, 'with subcategory:', subcategory);
-      const result = await db.query(query, [subcategory, searchPattern]);
-      console.log('Query Result:', result.rows?.length ?? 0, 'products found');
-      return result.rows || [];
-    } catch (error) {
-      console.error('Error in getProductsBySubcategory:', error);
-      return [];
-    }
-  }
+    const searchPattern = `%${mainCategory}%`;
 
-  async getProductsByNameSearch(searchTerm: string): Promise<Product[]> {
-    try {
-      const query = `
-        SELECT *
-        FROM bouquetbar.products
-        WHERE isactive = true
-          AND "inStock" = true
-          AND (
-            subcategory::jsonb ? $1 OR
-            subcategory::text ILIKE $2 OR 
-            main_category::jsonb ? $1 OR
-            main_category::text ILIKE $2 OR
-            name ILIKE $2 OR
-            description ILIKE $2
-          )
-        ORDER BY 
-          CASE 
-            WHEN name ILIKE $2 THEN 1
-            WHEN subcategory::jsonb ? $1 THEN 2
-            WHEN main_category::jsonb ? $1 THEN 3
-            WHEN subcategory::text ILIKE $2 THEN 4
-            WHEN main_category::text ILIKE $2 THEN 5
-            WHEN description ILIKE $2 THEN 6
-            ELSE 7
-          END,
-          createdat DESC;
-      `;
-      const searchPattern = `%${searchTerm}%`;
-      console.log('Executing getProductsByNameSearch query:', query, 'with searchTerm:', searchTerm);
-      const result = await db.query(query, [searchTerm, searchPattern]);
-      console.log('Query Result:', result.rows?.length ?? 0, 'products found');
-      return result.rows || [];
-    } catch (error) {
-      console.error('Error in getProductsByNameSearch:', error);
-      return [];
-    }
+    const result = await db.query(query, [searchPattern]);
+    return result.rows || [];
+  } catch (error) {
+    console.error('Error in getProductsByMainCategory:', error);
+    return [];
   }
+}
+
+
+async getProductsBySubcategory(subcategory: string): Promise<Product[]> {
+  try {
+    const query = `
+      SELECT *
+      FROM bouquetbar.products
+      WHERE isactive = true
+        AND "inStock" = true
+        AND subcategory ILIKE $1
+      ORDER BY createdat DESC;
+    `;
+
+    const searchPattern = `%${subcategory}%`;
+    console.log('Executing getProductsBySubcategory:', query, searchPattern);
+
+    const result = await db.query(query, [searchPattern]);
+    return result.rows || [];
+  } catch (error) {
+    console.error('Error in getProductsBySubcategory:', error);
+    return [];
+  }
+}
+
+
+ async getProductsByNameSearch(searchTerm: string): Promise<Product[]> {
+  try {
+    const query = `
+      SELECT *
+      FROM bouquetbar.products
+      WHERE isactive = true
+        AND "inStock" = true
+        AND (
+          subcategory ILIKE $1 OR
+          main_category ILIKE $1 OR
+          name ILIKE $1 OR
+          description ILIKE $1
+        )
+      ORDER BY createdat DESC;
+    `;
+
+    const searchPattern = `%${searchTerm}%`;
+    const result = await db.query(query, [searchPattern]);
+    return result.rows || [];
+  } catch (error) {
+    console.error('Error in getProductsByNameSearch:', error);
+    return [];
+  }
+}
+
+
+
+  async getProductsByMainCategoryAndFilter(
+  mainCategory: string,
+  flowerTypes: string[]
+): Promise<Product[]> {
+  console.log("getProductsByMainCategoryAndFilter called with:", {
+    mainCategory,
+    flowerTypes
+  });
+
+  try {
+    const conditions: string[] = ['isactive = true', '"inStock" = true'];
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    /* -------------------------------------------------
+       MAIN CATEGORY
+    --------------------------------------------------*/
+    conditions.push(`
+      (
+        (main_category ~ '^\\[' AND main_category::jsonb ? $${paramIndex})
+        OR main_category ILIKE $${paramIndex + 1}
+      )
+    `);
+    params.push(mainCategory, `%${mainCategory}%`);
+    paramIndex += 2;
+
+    /* -------------------------------------------------
+       FLOWERTYPES (FILTER COLUMN ONLY)
+    --------------------------------------------------*/
+    if (flowerTypes && flowerTypes.length > 0) {
+      const flowerConditions = flowerTypes
+        .map((_, idx) => {
+          const p = paramIndex + idx * 2;
+          return `
+            (
+              (filter ~ '^\\[' AND filter::jsonb ? $${p})
+              OR filter ILIKE $${p + 1}
+            )
+          `;
+        })
+        .join(" OR ");
+
+      conditions.push(`(${flowerConditions})`);
+
+      flowerTypes.forEach(f => params.push(f, `%${f}%`));
+      paramIndex += flowerTypes.length * 2;
+    }
+
+    /* -------------------------------------------------
+       FINAL QUERY
+    --------------------------------------------------*/
+    const query = `
+      SELECT *
+      FROM bouquetbar.products
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY createdat DESC;
+    `;
+
+    console.log("Executing getProductsByMainCategoryAndFilter:", query);
+    console.log("Params:", params);
+
+    const result = await db.query(query, params);
+    console.log("Products Found:", result.rows.length);
+
+    return result.rows;
+  } catch (error) {
+    console.error("Error in getProductsByMainCategoryAndFilter:", error);
+    return [];
+  }
+}
+
+  
+async getProductsByMainCategoryAndSubcategoryAndFilter(
+  mainCategory: string,
+  subcategory: string,
+  flowerTypes: string[],
+  arrangements: string[],
+  colors?: string[]
+): Promise<Product[]> {
+  console.log("getProductsByMainCategoryAndSubcategoryAndFilter called with:", {
+    mainCategory,
+    subcategory,          
+    flowerTypes,
+    arrangements,
+    colors
+  }); 
+  try {
+    const conditions: string[] = ['isactive = true'];
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    /* ----------------------------
+       MAIN CATEGORY
+    -----------------------------*/
+    conditions.push(`main_category ILIKE $${paramIndex}`);
+    params.push(`%${mainCategory}%`);
+    paramIndex++;
+
+    /* ----------------------------
+       SUBCATEGORY
+    -----------------------------*/
+    conditions.push(`subcategory ILIKE $${paramIndex}`);
+    params.push(`%${subcategory}%`);
+    paramIndex++;
+
+
+    /* ----------------------------
+       🌸 FLOWER TYPES (JSON)
+    -----------------------------*/
+    let flowerCondition = "";
+    if (flowerTypes.length > 0) {
+      flowerCondition = flowerTypes
+        .map(() => `filter::jsonb ? $${paramIndex++}`)
+        .join(" OR ");
+      flowerTypes.forEach(f => params.push(f));
+    }
+
+    /* ----------------------------
+       🎍 ARRANGEMENTS (JSON)
+    -----------------------------*/
+    let arrangementCondition = "";
+    if (arrangements.length > 0) {
+      arrangementCondition = arrangements
+        .map(() => `filter::jsonb ? $${paramIndex++}`)
+        .join(" OR ");
+      arrangements.forEach(a => params.push(a));
+    }
+
+    // Combine flowerTypes and arrangements with AND between groups
+    if (flowerCondition && arrangementCondition) {
+      conditions.push(`(${flowerCondition}) AND (${arrangementCondition})`);
+    } else if (flowerCondition) {
+      conditions.push(`(${flowerCondition})`);
+    } else if (arrangementCondition) {
+      conditions.push(`(${arrangementCondition})`);
+    }
+
+    /* ----------------------------
+       🎨 COLORS
+    -----------------------------*/
+    if (colors && colors.length > 0) {
+      const colorQuery = colors
+        .map(() => `colour ILIKE $${paramIndex++}`)
+        .join(" OR ");
+      colors.forEach(c => params.push(`%${c}%`));
+      conditions.push(`(${colorQuery})`);
+    }
+
+    /* ----------------------------
+       FINAL QUERY
+    -----------------------------*/
+    const query = `
+      SELECT *
+      FROM bouquetbar.products
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY createdat DESC;
+    `;
+
+    console.log("✅ JSON QUERY:", query);
+    console.log("✅ PARAMS:", params);
+
+    const result = await db.query(query, params);
+    return result.rows;
+
+  } catch (error) {
+    console.error("❌ JSON FILTER ERROR:", error);
+    return [];
+  }
+}
+
+
+
+
+
 
   async getProductsByMainCategoryAndSubcategory(mainCategory: string, subcategory: string): Promise<Product[]> {
+    console.log('getProductsByMainCategoryAndSubcategory called with:', { mainCategory, subcategory });
     try {
       const query = `
         SELECT *
@@ -1026,21 +1188,16 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
         WHERE isactive = true
           AND "inStock" = true
           AND (
-            main_category::jsonb ? $1 OR
-            main_category::text ILIKE $3
+            (main_category ~ '^\\[' AND main_category::jsonb ? $1) OR
+            main_category ILIKE $3
           )
           AND (
-            subcategory::jsonb ? $2 OR
-            subcategory::text ILIKE $4
+            (subcategory ~ '^\\[' AND subcategory::jsonb ? $2) OR
+            subcategory ILIKE $4
           )
-        ORDER BY 
-          CASE 
-            WHEN subcategory::jsonb ? $2 AND main_category::jsonb ? $1 THEN 1
-            WHEN subcategory::text ILIKE $4 AND main_category::text ILIKE $3 THEN 2
-            ELSE 3
-          END,
-          createdat DESC;
+        ORDER BY createdat DESC;
       `;
+      
       const mainCategoryPattern = `%${mainCategory}%`;
       const subcategoryPattern = `%${subcategory}%`;
       console.log('Executing getProductsByMainCategoryAndSubcategory query:', query, 'with mainCategory:', mainCategory, 'subcategory:', subcategory);
@@ -1052,6 +1209,7 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
       return [];
     }
   }
+  
 
   async getProductsWithFilters(filters: {
     name?: string;
@@ -1063,6 +1221,8 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
     colors?: string[];
     flowerTypes?: string[];
     arrangements?: string[];
+     main_category?: string;    
+  subcategory?: string;  
   }): Promise<Product[]> {
     try {
       console.log('getProductsWithFilters called with:', filters);
@@ -1113,7 +1273,22 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
       const queryParams: any[] = [];
       let paramIndex = 1;
       
-      
+      if (filters.main_category) {
+  query += ` AND (
+    main_category ILIKE $${paramIndex}
+  )`;
+  queryParams.push(`%${filters.main_category}%`);
+  paramIndex++;
+}
+
+if (filters.subcategory) {
+  query += ` AND (
+    subcategory ILIKE $${paramIndex}
+  )`;
+  queryParams.push(`%${filters.subcategory}%`);
+  paramIndex++;
+}
+
       // Add name search filter
       if (filters.name) {
         query += ` AND (
@@ -1385,6 +1560,13 @@ ORDER BY B.createdat DESC; `;
     const values: any[] = [];
     let valueCount = 1;
 
+    // Handle filter field
+    if ((updates as any).filter !== undefined) {
+      updateFields.push(`filter = $${valueCount}`);
+      values.push((updates as any).filter);
+      valueCount++;
+    }
+
     // Handle name field
     if(updates.name !== undefined) {
   updateFields.push(`name = $${valueCount}`);
@@ -1617,10 +1799,10 @@ return result.rows[0];
           text: `
           INSERT INTO bouquetbar.products (
             name, description, price, originalprice, discount_percentage, discount_amount, main_category, subcategory, stockquantity,
-            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image,
+            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image, filter,
             createdat
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
           RETURNING *;
         `,
           values: [
@@ -1639,7 +1821,8 @@ return result.rows[0];
             productData.isbestseller || false,
             productData.colour || null,
             productData.discounts_offers ? true : false,
-            productData.image || null
+            productData.image || null,
+            Array.isArray(productData.filter) ? JSON.stringify(productData.filter) : (productData.filter || null)
           ]
         };
 
@@ -1652,10 +1835,10 @@ return result.rows[0];
           text: `
           INSERT INTO bouquetbar.products (
             name, description, price, main_category, subcategory, stockquantity,
-            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image,
+            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image, filter,
             createdat
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
           RETURNING *;
         `,
           values: [
@@ -1671,7 +1854,8 @@ return result.rows[0];
             productData.isbestseller || false,
             productData.colour || null,
             Boolean(productData.discounts_offers),
-            productData.image || null
+            productData.image || null,
+            Array.isArray(productData.filter) ? JSON.stringify(productData.filter) : (productData.filter || null)
           ]
         };
 
@@ -1878,9 +2062,6 @@ return {
       delivery_option,
       distance,
       deliverycharge,
-      couponcode,
-      discountamount,
-      shippingaddressid,
       ordernumber,
       paymentmethod,
       paymentcharges,
@@ -1905,12 +2086,9 @@ return {
       '${order.deliveryDate ?? ''}',
       ${order.subtotal},
       '${order.deliveryOptionId ?? ''}',
-      '${order.delivery_option ?? ''}',
-      ${order.distance ?? 0},
+      '${order.delivery_option}',
+      ${order.distance},
       ${order.deliveryCharge ?? 0},
-      '${order.couponCode ?? ''}',
-      ${order.discountAmount ?? 0},
-      '${order.shippingAddressId ?? ''}',
       '${orderNumber}',
       '${order.paymentMethod}',
       ${order.paymentCharges ?? 0},
@@ -2561,7 +2739,7 @@ return {
 };
   }
 
-  async calculateOrderPricing(subtotal: number, deliveryOptionId: string, couponCode ?: string, paymentMethod ?: string): Promise < {
+  async calculateOrderPricing(subtotal: number, deliveryOptionId: string, code ?: string, paymentMethod ?: string): Promise < {
   subtotal: number;
   deliveryCharge: number;
   discountAmount: number;
@@ -2574,10 +2752,10 @@ return {
 
   // ✅ Coupon discount
   let discountAmount = 0;
-  if(couponCode) {
+  if(code) {
     const couponQuery = `
         SELECT * FROM bouquetbar.coupons
-        WHERE code = '${couponCode}'
+        WHERE code = '${code}'
         AND isactive = true
         LIMIT 1;
       `;
@@ -2926,7 +3104,7 @@ return { subtotal, deliveryCharge, discountAmount, paymentCharges, total };
 // Step 2: Create order inside transaction
 const createdOrder = await this.createOrderWithTransaction(
   validation.validatedOrder!,
-  orderData.couponCode,
+  orderData.code,
   userId
 );
 
@@ -2994,16 +3172,16 @@ if (orderData.userId && orderData.shippingAddressId) {
   }
 }
 
-// ❌ Stop if errors found
+
 if (errors.length > 0) {
   return { isValid: false, errors };
 }
 
-// ✅ 4. Calculate pricing (server-side check)
+
 const calculatedPricing = await this.calculateOrderPricing(
   orderData.subtotal,
   orderData.deliveryOptionId,
-  orderData.couponCode,
+  orderData.code,
   orderData.paymentMethod
 );
 
@@ -3012,9 +3190,7 @@ const tolerance = 0.01;
 if (Math.abs(calculatedPricing.deliveryCharge - orderData.deliveryCharge) > tolerance) {
   errors.push("Delivery charge mismatch");
 }
-if (Math.abs(calculatedPricing.discountAmount - orderData.discountAmount) > tolerance) {
-  errors.push("Discount amount mismatch");
-}
+   
 // if (Math.abs(calculatedPricing.total - orderData.total) > tolerance) {
 //   errors.push("Total amount mismatch");
 // }
@@ -3035,8 +3211,10 @@ const validatedOrder: InsertOrder = {
   items: cartValidation.validatedItems!,
   subtotal: orderData.subtotal.toString(),
   deliveryOptionId: orderData.deliveryOptionId,
+  delivery_option: orderData.delivery_option,
+  distance: orderData.distance,
   deliveryCharge: calculatedPricing.deliveryCharge.toString(),
-  couponCode: orderData.couponCode,
+
   discountAmount: calculatedPricing.discountAmount.toString(),
   paymentMethod: orderData.paymentMethod,
   paymentCharges: calculatedPricing.paymentCharges.toString(),
@@ -3073,7 +3251,7 @@ return {
 
   async createOrderWithTransaction(
   validatedOrder: InsertOrder,
-  couponCode ?: string,
+  code ?: string,
   userId ?: string
 ): Promise < Order > {
   try {
@@ -3112,17 +3290,15 @@ return {
         deliverydate,
         subtotal,
         deliverycharge,
-        couponcode,
-        discountamount,
-        shippingaddressid,
         ordernumber,
+        delivery_option,
+        distance,
         paymentmethod,
         paymentcharges,
         paymentstatus,
         paymenttransactionid,
         estimateddeliverydate,
         updatedat,
-        statusupdated_at,
         pointsawarded
       ) VALUES (
         '${username || validatedOrder.customerName || ''}',
@@ -3139,16 +3315,14 @@ return {
         ${validatedOrder.deliveryDate && validatedOrder.deliveryDate instanceof Date && !isNaN(validatedOrder.deliveryDate.getTime()) ? `'${validatedOrder.deliveryDate.toISOString()}'` : "NULL"},
         ${validatedOrder.subtotal},
         ${validatedOrder.deliveryCharge || 0},
-        '${couponCode || ""}',
-        ${validatedOrder.discountAmount || 0},
-        ${validatedOrder.shippingAddressId ? `'${validatedOrder.shippingAddressId}'` : "NULL"},
         '${orderNumber}',
-  '${validatedOrder.paymentMethod || 'Cash'}',
-  ${validatedOrder.paymentCharges || 0},
-  '${validatedOrder.paymentStatus || 'pending'}',
-  '${validatedOrder.paymentTransactionId || ""}',
+        '${validatedOrder.delivery_option}',
+        ${validatedOrder.distance},
+        '${validatedOrder.paymentMethod || 'Cash'}',
+        ${validatedOrder.paymentCharges || 0},
+        '${validatedOrder.paymentStatus || 'pending'}',
+        '${validatedOrder.paymentTransactionId || ""}',
         ${validatedOrder.estimatedDeliveryDate && validatedOrder.estimatedDeliveryDate instanceof Date && !isNaN(validatedOrder.estimatedDeliveryDate.getTime()) ? `'${validatedOrder.estimatedDeliveryDate.toISOString()}'` : "NULL"},
-        NOW(),
         NOW(),
         ${validatedOrder.pointsAwarded ? "true" : "false"}
       )
@@ -3177,11 +3351,11 @@ return {
     }
 
       // 5️⃣ Increment coupon usage
-      if(couponCode) {
+      if(code) {
       const couponQuery = `
         UPDATE bouquetbar.coupons
         SET timesused = timesused + 1, updatedat = NOW()
-        WHERE code = '${couponCode}';
+        WHERE code = '${code}';
       `;
       await db.query(couponQuery);
     }
