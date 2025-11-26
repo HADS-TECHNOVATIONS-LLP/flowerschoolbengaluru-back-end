@@ -952,38 +952,55 @@ export class DatabaseStorage {
             /* ----------------------------
                MAIN CATEGORY
             -----------------------------*/
-            conditions.push(`main_category ILIKE $${paramIndex}`);
-            params.push(`%${mainCategory}%`);
-            paramIndex++;
+            // Support both JSON array and text matching for main_category
+            conditions.push(`(
+      (main_category ~ '^\\[' AND main_category::jsonb ? $${paramIndex})
+      OR main_category ILIKE $${paramIndex + 1}
+    )`);
+            params.push(mainCategory, `%${mainCategory}%`);
+            paramIndex += 2;
             /* ----------------------------
                SUBCATEGORY
             -----------------------------*/
-            conditions.push(`subcategory ILIKE $${paramIndex}`);
-            params.push(`%${subcategory}%`);
-            paramIndex++;
+            conditions.push(`(
+      (subcategory ~ '^\\[' AND subcategory::jsonb ? $${paramIndex})
+      OR subcategory ILIKE $${paramIndex + 1}
+    )`);
+            params.push(subcategory, `%${subcategory}%`);
+            paramIndex += 2;
             /* ----------------------------
-               🌸 FLOWER TYPES (JSON)
+               🌸 FLOWER TYPES (JSON + ILIKE)
             -----------------------------*/
             let flowerCondition = "";
             if (flowerTypes.length > 0) {
                 flowerCondition = flowerTypes
-                    .map(() => `filter::jsonb ? $${paramIndex++}`)
+                    .map((f, i) => {
+                    const jsonParam = paramIndex + i * 2;
+                    const ilikeParam = jsonParam + 1;
+                    return `((filter ~ '^\\[' AND filter::jsonb ? $${jsonParam}) OR filter ILIKE $${ilikeParam})`;
+                })
                     .join(" OR ");
-                flowerTypes.forEach(f => params.push(f));
+                flowerTypes.forEach(f => params.push(f, `%${f}%`));
+                paramIndex += flowerTypes.length * 2;
             }
             /* ----------------------------
-               🎍 ARRANGEMENTS (JSON)
+               🎍 ARRANGEMENTS (JSON + ILIKE)
             -----------------------------*/
             let arrangementCondition = "";
             if (arrangements.length > 0) {
                 arrangementCondition = arrangements
-                    .map(() => `filter::jsonb ? $${paramIndex++}`)
+                    .map((a, i) => {
+                    const jsonParam = paramIndex + i * 2;
+                    const ilikeParam = jsonParam + 1;
+                    return `((filter ~ '^\\[' AND filter::jsonb ? $${jsonParam}) OR filter ILIKE $${ilikeParam})`;
+                })
                     .join(" OR ");
-                arrangements.forEach(a => params.push(a));
+                arrangements.forEach(a => params.push(a, `%${a}%`));
+                paramIndex += arrangements.length * 2;
             }
-            // Combine flowerTypes and arrangements with AND between groups
+            // Combine flowerTypes and arrangements with OR between groups
             if (flowerCondition && arrangementCondition) {
-                conditions.push(`(${flowerCondition}) AND (${arrangementCondition})`);
+                conditions.push(`((${flowerCondition}) OR (${arrangementCondition}))`);
             }
             else if (flowerCondition) {
                 conditions.push(`(${flowerCondition})`);
@@ -2836,8 +2853,6 @@ ORDER BY B.createdat DESC; `;
         deliverydate,
         subtotal,
         deliverycharge,
-        code,
-        shippingaddressid,
         ordernumber,
         delivery_option,
         distance,
@@ -2847,7 +2862,6 @@ ORDER BY B.createdat DESC; `;
         paymenttransactionid,
         estimateddeliverydate,
         updatedat,
-        statusupdated_at,
         pointsawarded
       ) VALUES (
         '${username || validatedOrder.customerName || ''}',
@@ -2864,8 +2878,6 @@ ORDER BY B.createdat DESC; `;
         ${validatedOrder.deliveryDate && validatedOrder.deliveryDate instanceof Date && !isNaN(validatedOrder.deliveryDate.getTime()) ? `'${validatedOrder.deliveryDate.toISOString()}'` : "NULL"},
         ${validatedOrder.subtotal},
         ${validatedOrder.deliveryCharge || 0},
-       
-        ${validatedOrder.shippingAddressId ? `'${validatedOrder.shippingAddressId}'` : "NULL"},
         '${orderNumber}',
         '${validatedOrder.delivery_option}',
         ${validatedOrder.distance},
@@ -2874,7 +2886,6 @@ ORDER BY B.createdat DESC; `;
         '${validatedOrder.paymentStatus || 'pending'}',
         '${validatedOrder.paymentTransactionId || ""}',
         ${validatedOrder.estimatedDeliveryDate && validatedOrder.estimatedDeliveryDate instanceof Date && !isNaN(validatedOrder.estimatedDeliveryDate.getTime()) ? `'${validatedOrder.estimatedDeliveryDate.toISOString()}'` : "NULL"},
-        NOW(),
         NOW(),
         ${validatedOrder.pointsAwarded ? "true" : "false"}
       )
