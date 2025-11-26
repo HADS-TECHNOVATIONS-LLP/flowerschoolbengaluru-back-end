@@ -818,20 +818,15 @@ export class DatabaseStorage {
     async getProductsByMainCategory(mainCategory) {
         try {
             const query = `
-        SELECT *
-        FROM bouquetbar.products
-        WHERE isactive = true
-          AND "inStock" = true
-          AND (
-            main_category::jsonb ? $1 OR
-            main_category::text ILIKE $2
-          )
-        ORDER BY createdat DESC;
-      `;
+      SELECT *
+      FROM bouquetbar.products
+      WHERE isactive = true
+        AND "inStock" = true
+        AND main_category ILIKE $1
+      ORDER BY createdat DESC;
+    `;
             const searchPattern = `%${mainCategory}%`;
-            console.log('Executing getProductsByMainCategory query:', query, 'with main_category:', mainCategory);
-            const result = await db.query(query, [mainCategory, searchPattern]);
-            console.log('Query Result:', result.rows?.length ?? 0, 'products found');
+            const result = await db.query(query, [searchPattern]);
             return result.rows || [];
         }
         catch (error) {
@@ -842,20 +837,16 @@ export class DatabaseStorage {
     async getProductsBySubcategory(subcategory) {
         try {
             const query = `
-        SELECT *
-        FROM bouquetbar.products
-        WHERE isactive = true
-          AND "inStock" = true
-          AND (
-            subcategory::jsonb ? $1 OR
-            subcategory::text ILIKE $2
-          )
-        ORDER BY createdat DESC;
-      `;
+      SELECT *
+      FROM bouquetbar.products
+      WHERE isactive = true
+        AND "inStock" = true
+        AND subcategory ILIKE $1
+      ORDER BY createdat DESC;
+    `;
             const searchPattern = `%${subcategory}%`;
-            console.log('Executing getProductsBySubcategory query:', query, 'with subcategory:', subcategory);
-            const result = await db.query(query, [subcategory, searchPattern]);
-            console.log('Query Result:', result.rows?.length ?? 0, 'products found');
+            console.log('Executing getProductsBySubcategory:', query, searchPattern);
+            const result = await db.query(query, [searchPattern]);
             return result.rows || [];
         }
         catch (error) {
@@ -866,34 +857,20 @@ export class DatabaseStorage {
     async getProductsByNameSearch(searchTerm) {
         try {
             const query = `
-        SELECT *
-        FROM bouquetbar.products
-        WHERE isactive = true
-          AND "inStock" = true
-          AND (
-            subcategory::jsonb ? $1 OR
-            subcategory::text ILIKE $2 OR 
-            main_category::jsonb ? $1 OR
-            main_category::text ILIKE $2 OR
-            name ILIKE $2 OR
-            description ILIKE $2
-          )
-        ORDER BY 
-          CASE 
-            WHEN name ILIKE $2 THEN 1
-            WHEN subcategory::jsonb ? $1 THEN 2
-            WHEN main_category::jsonb ? $1 THEN 3
-            WHEN subcategory::text ILIKE $2 THEN 4
-            WHEN main_category::text ILIKE $2 THEN 5
-            WHEN description ILIKE $2 THEN 6
-            ELSE 7
-          END,
-          createdat DESC;
-      `;
+      SELECT *
+      FROM bouquetbar.products
+      WHERE isactive = true
+        AND "inStock" = true
+        AND (
+          subcategory ILIKE $1 OR
+          main_category ILIKE $1 OR
+          name ILIKE $1 OR
+          description ILIKE $1
+        )
+      ORDER BY createdat DESC;
+    `;
             const searchPattern = `%${searchTerm}%`;
-            console.log('Executing getProductsByNameSearch query:', query, 'with searchTerm:', searchTerm);
-            const result = await db.query(query, [searchTerm, searchPattern]);
-            console.log('Query Result:', result.rows?.length ?? 0, 'products found');
+            const result = await db.query(query, [searchPattern]);
             return result.rows || [];
         }
         catch (error) {
@@ -901,7 +878,150 @@ export class DatabaseStorage {
             return [];
         }
     }
+    async getProductsByMainCategoryAndFilter(mainCategory, flowerTypes) {
+        console.log("getProductsByMainCategoryAndFilter called with:", {
+            mainCategory,
+            flowerTypes
+        });
+        try {
+            const conditions = ['isactive = true', '"inStock" = true'];
+            const params = [];
+            let paramIndex = 1;
+            /* -------------------------------------------------
+               MAIN CATEGORY
+            --------------------------------------------------*/
+            conditions.push(`
+      (
+        (main_category ~ '^\\[' AND main_category::jsonb ? $${paramIndex})
+        OR main_category ILIKE $${paramIndex + 1}
+      )
+    `);
+            params.push(mainCategory, `%${mainCategory}%`);
+            paramIndex += 2;
+            /* -------------------------------------------------
+               FLOWERTYPES (FILTER COLUMN ONLY)
+            --------------------------------------------------*/
+            if (flowerTypes && flowerTypes.length > 0) {
+                const flowerConditions = flowerTypes
+                    .map((_, idx) => {
+                    const p = paramIndex + idx * 2;
+                    return `
+            (
+              (filter ~ '^\\[' AND filter::jsonb ? $${p})
+              OR filter ILIKE $${p + 1}
+            )
+          `;
+                })
+                    .join(" OR ");
+                conditions.push(`(${flowerConditions})`);
+                flowerTypes.forEach(f => params.push(f, `%${f}%`));
+                paramIndex += flowerTypes.length * 2;
+            }
+            /* -------------------------------------------------
+               FINAL QUERY
+            --------------------------------------------------*/
+            const query = `
+      SELECT *
+      FROM bouquetbar.products
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY createdat DESC;
+    `;
+            console.log("Executing getProductsByMainCategoryAndFilter:", query);
+            console.log("Params:", params);
+            const result = await db.query(query, params);
+            console.log("Products Found:", result.rows.length);
+            return result.rows;
+        }
+        catch (error) {
+            console.error("Error in getProductsByMainCategoryAndFilter:", error);
+            return [];
+        }
+    }
+    async getProductsByMainCategoryAndSubcategoryAndFilter(mainCategory, subcategory, flowerTypes, arrangements, colors) {
+        console.log("getProductsByMainCategoryAndSubcategoryAndFilter called with:", {
+            mainCategory,
+            subcategory,
+            flowerTypes,
+            arrangements,
+            colors
+        });
+        try {
+            const conditions = ['isactive = true'];
+            const params = [];
+            let paramIndex = 1;
+            /* ----------------------------
+               MAIN CATEGORY
+            -----------------------------*/
+            conditions.push(`main_category ILIKE $${paramIndex}`);
+            params.push(`%${mainCategory}%`);
+            paramIndex++;
+            /* ----------------------------
+               SUBCATEGORY
+            -----------------------------*/
+            conditions.push(`subcategory ILIKE $${paramIndex}`);
+            params.push(`%${subcategory}%`);
+            paramIndex++;
+            /* ----------------------------
+               🌸 FLOWER TYPES (JSON)
+            -----------------------------*/
+            let flowerCondition = "";
+            if (flowerTypes.length > 0) {
+                flowerCondition = flowerTypes
+                    .map(() => `filter::jsonb ? $${paramIndex++}`)
+                    .join(" OR ");
+                flowerTypes.forEach(f => params.push(f));
+            }
+            /* ----------------------------
+               🎍 ARRANGEMENTS (JSON)
+            -----------------------------*/
+            let arrangementCondition = "";
+            if (arrangements.length > 0) {
+                arrangementCondition = arrangements
+                    .map(() => `filter::jsonb ? $${paramIndex++}`)
+                    .join(" OR ");
+                arrangements.forEach(a => params.push(a));
+            }
+            // Combine flowerTypes and arrangements with AND between groups
+            if (flowerCondition && arrangementCondition) {
+                conditions.push(`(${flowerCondition}) AND (${arrangementCondition})`);
+            }
+            else if (flowerCondition) {
+                conditions.push(`(${flowerCondition})`);
+            }
+            else if (arrangementCondition) {
+                conditions.push(`(${arrangementCondition})`);
+            }
+            /* ----------------------------
+               🎨 COLORS
+            -----------------------------*/
+            if (colors && colors.length > 0) {
+                const colorQuery = colors
+                    .map(() => `colour ILIKE $${paramIndex++}`)
+                    .join(" OR ");
+                colors.forEach(c => params.push(`%${c}%`));
+                conditions.push(`(${colorQuery})`);
+            }
+            /* ----------------------------
+               FINAL QUERY
+            -----------------------------*/
+            const query = `
+      SELECT *
+      FROM bouquetbar.products
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY createdat DESC;
+    `;
+            console.log("✅ JSON QUERY:", query);
+            console.log("✅ PARAMS:", params);
+            const result = await db.query(query, params);
+            return result.rows;
+        }
+        catch (error) {
+            console.error("❌ JSON FILTER ERROR:", error);
+            return [];
+        }
+    }
     async getProductsByMainCategoryAndSubcategory(mainCategory, subcategory) {
+        console.log('getProductsByMainCategoryAndSubcategory called with:', { mainCategory, subcategory });
         try {
             const query = `
         SELECT *
@@ -909,20 +1029,14 @@ export class DatabaseStorage {
         WHERE isactive = true
           AND "inStock" = true
           AND (
-            main_category::jsonb ? $1 OR
-            main_category::text ILIKE $3
+            (main_category ~ '^\\[' AND main_category::jsonb ? $1) OR
+            main_category ILIKE $3
           )
           AND (
-            subcategory::jsonb ? $2 OR
-            subcategory::text ILIKE $4
+            (subcategory ~ '^\\[' AND subcategory::jsonb ? $2) OR
+            subcategory ILIKE $4
           )
-        ORDER BY 
-          CASE 
-            WHEN subcategory::jsonb ? $2 AND main_category::jsonb ? $1 THEN 1
-            WHEN subcategory::text ILIKE $4 AND main_category::text ILIKE $3 THEN 2
-            ELSE 3
-          END,
-          createdat DESC;
+        ORDER BY createdat DESC;
       `;
             const mainCategoryPattern = `%${mainCategory}%`;
             const subcategoryPattern = `%${subcategory}%`;
@@ -991,6 +1105,20 @@ export class DatabaseStorage {
       `;
             const queryParams = [];
             let paramIndex = 1;
+            if (filters.main_category) {
+                query += ` AND (
+    main_category ILIKE $${paramIndex}
+  )`;
+                queryParams.push(`%${filters.main_category}%`);
+                paramIndex++;
+            }
+            if (filters.subcategory) {
+                query += ` AND (
+    subcategory ILIKE $${paramIndex}
+  )`;
+                queryParams.push(`%${filters.subcategory}%`);
+                paramIndex++;
+            }
             // Add name search filter
             if (filters.name) {
                 query += ` AND (
@@ -1241,6 +1369,12 @@ ORDER BY B.createdat DESC; `;
             const updateFields = [];
             const values = [];
             let valueCount = 1;
+            // Handle filter field
+            if (updates.filter !== undefined) {
+                updateFields.push(`filter = $${valueCount}`);
+                values.push(updates.filter);
+                valueCount++;
+            }
             // Handle name field
             if (updates.name !== undefined) {
                 updateFields.push(`name = $${valueCount}`);
@@ -1442,10 +1576,10 @@ ORDER BY B.createdat DESC; `;
                     text: `
           INSERT INTO bouquetbar.products (
             name, description, price, originalprice, discount_percentage, discount_amount, main_category, subcategory, stockquantity,
-            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image,
+            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image, filter,
             createdat
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
           RETURNING *;
         `,
                     values: [
@@ -1464,7 +1598,8 @@ ORDER BY B.createdat DESC; `;
                         productData.isbestseller || false,
                         productData.colour || null,
                         productData.discounts_offers ? true : false,
-                        productData.image || null
+                        productData.image || null,
+                        Array.isArray(productData.filter) ? JSON.stringify(productData.filter) : (productData.filter || null)
                     ]
                 };
                 console.log('Executing product insert (with discounts) values:', query.values);
@@ -1477,10 +1612,10 @@ ORDER BY B.createdat DESC; `;
                     text: `
           INSERT INTO bouquetbar.products (
             name, description, price, main_category, subcategory, stockquantity,
-            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image,
+            "inStock", featured, iscustom, isbestseller, colour, discounts_offers, image, filter,
             createdat
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
           RETURNING *;
         `,
                     values: [
@@ -1496,7 +1631,8 @@ ORDER BY B.createdat DESC; `;
                         productData.isbestseller || false,
                         productData.colour || null,
                         Boolean(productData.discounts_offers),
-                        productData.image || null
+                        productData.image || null,
+                        Array.isArray(productData.filter) ? JSON.stringify(productData.filter) : (productData.filter || null)
                     ]
                 };
                 console.log('Executing basic product insert values:', basicQuery.values);
@@ -1676,9 +1812,6 @@ ORDER BY B.createdat DESC; `;
       delivery_option,
       distance,
       deliverycharge,
-      couponcode,
-      discountamount,
-      shippingaddressid,
       ordernumber,
       paymentmethod,
       paymentcharges,
@@ -1703,12 +1836,9 @@ ORDER BY B.createdat DESC; `;
       '${order.deliveryDate ?? ''}',
       ${order.subtotal},
       '${order.deliveryOptionId ?? ''}',
-      '${order.delivery_option ?? ''}',
-      ${order.distance ?? 0},
+      '${order.delivery_option}',
+      ${order.distance},
       ${order.deliveryCharge ?? 0},
-      '${order.couponCode ?? ''}',
-      ${order.discountAmount ?? 0},
-      '${order.shippingAddressId ?? ''}',
       '${orderNumber}',
       '${order.paymentMethod}',
       ${order.paymentCharges ?? 0},
@@ -2264,16 +2394,16 @@ ORDER BY B.createdat DESC; `;
             validatedItems: errors.length === 0 ? validatedItems : undefined
         };
     }
-    async calculateOrderPricing(subtotal, deliveryOptionId, couponCode, paymentMethod) {
+    async calculateOrderPricing(subtotal, deliveryOptionId, code, paymentMethod) {
         // ✅ Delivery option
         // Remove delivery charge calculation - always 0
         const deliveryCharge = 0;
         // ✅ Coupon discount
         let discountAmount = 0;
-        if (couponCode) {
+        if (code) {
             const couponQuery = `
         SELECT * FROM bouquetbar.coupons
-        WHERE code = '${couponCode}'
+        WHERE code = '${code}'
         AND isactive = true
         LIMIT 1;
       `;
@@ -2560,7 +2690,7 @@ ORDER BY B.createdat DESC; `;
                 };
             }
             // Step 2: Create order inside transaction
-            const createdOrder = await this.createOrderWithTransaction(validation.validatedOrder, orderData.couponCode, userId);
+            const createdOrder = await this.createOrderWithTransaction(validation.validatedOrder, orderData.code, userId);
             return {
                 isValid: true,
                 order: createdOrder,
@@ -2610,19 +2740,14 @@ ORDER BY B.createdat DESC; `;
                 errors.push("Invalid shipping address");
             }
         }
-        // ❌ Stop if errors found
         if (errors.length > 0) {
             return { isValid: false, errors };
         }
-        // ✅ 4. Calculate pricing (server-side check)
-        const calculatedPricing = await this.calculateOrderPricing(orderData.subtotal, orderData.deliveryOptionId, orderData.couponCode, orderData.paymentMethod);
+        const calculatedPricing = await this.calculateOrderPricing(orderData.subtotal, orderData.deliveryOptionId, orderData.code, orderData.paymentMethod);
         // ✅ 5. Validate pricing consistency with tolerance
         const tolerance = 0.01;
         if (Math.abs(calculatedPricing.deliveryCharge - orderData.deliveryCharge) > tolerance) {
             errors.push("Delivery charge mismatch");
-        }
-        if (Math.abs(calculatedPricing.discountAmount - orderData.discountAmount) > tolerance) {
-            errors.push("Discount amount mismatch");
         }
         // if (Math.abs(calculatedPricing.total - orderData.total) > tolerance) {
         //   errors.push("Total amount mismatch");
@@ -2642,8 +2767,9 @@ ORDER BY B.createdat DESC; `;
             items: cartValidation.validatedItems,
             subtotal: orderData.subtotal.toString(),
             deliveryOptionId: orderData.deliveryOptionId,
+            delivery_option: orderData.delivery_option,
+            distance: orderData.distance,
             deliveryCharge: calculatedPricing.deliveryCharge.toString(),
-            couponCode: orderData.couponCode,
             discountAmount: calculatedPricing.discountAmount.toString(),
             paymentMethod: orderData.paymentMethod,
             paymentCharges: calculatedPricing.paymentCharges.toString(),
@@ -2675,7 +2801,7 @@ ORDER BY B.createdat DESC; `;
             calculatedPricing,
         };
     }
-    async createOrderWithTransaction(validatedOrder, couponCode, userId) {
+    async createOrderWithTransaction(validatedOrder, code, userId) {
         try {
             // 1️⃣ Generate order number
             const orderNumber = await this.generateOrderNumber();
@@ -2710,10 +2836,11 @@ ORDER BY B.createdat DESC; `;
         deliverydate,
         subtotal,
         deliverycharge,
-        couponcode,
-        discountamount,
+        code,
         shippingaddressid,
         ordernumber,
+        delivery_option,
+        distance,
         paymentmethod,
         paymentcharges,
         paymentstatus,
@@ -2737,14 +2864,15 @@ ORDER BY B.createdat DESC; `;
         ${validatedOrder.deliveryDate && validatedOrder.deliveryDate instanceof Date && !isNaN(validatedOrder.deliveryDate.getTime()) ? `'${validatedOrder.deliveryDate.toISOString()}'` : "NULL"},
         ${validatedOrder.subtotal},
         ${validatedOrder.deliveryCharge || 0},
-        '${couponCode || ""}',
-        ${validatedOrder.discountAmount || 0},
+       
         ${validatedOrder.shippingAddressId ? `'${validatedOrder.shippingAddressId}'` : "NULL"},
         '${orderNumber}',
-  '${validatedOrder.paymentMethod || 'Cash'}',
-  ${validatedOrder.paymentCharges || 0},
-  '${validatedOrder.paymentStatus || 'pending'}',
-  '${validatedOrder.paymentTransactionId || ""}',
+        '${validatedOrder.delivery_option}',
+        ${validatedOrder.distance},
+        '${validatedOrder.paymentMethod || 'Cash'}',
+        ${validatedOrder.paymentCharges || 0},
+        '${validatedOrder.paymentStatus || 'pending'}',
+        '${validatedOrder.paymentTransactionId || ""}',
         ${validatedOrder.estimatedDeliveryDate && validatedOrder.estimatedDeliveryDate instanceof Date && !isNaN(validatedOrder.estimatedDeliveryDate.getTime()) ? `'${validatedOrder.estimatedDeliveryDate.toISOString()}'` : "NULL"},
         NOW(),
         NOW(),
@@ -2771,11 +2899,11 @@ ORDER BY B.createdat DESC; `;
                 }
             }
             // 5️⃣ Increment coupon usage
-            if (couponCode) {
+            if (code) {
                 const couponQuery = `
         UPDATE bouquetbar.coupons
         SET timesused = timesused + 1, updatedat = NOW()
-        WHERE code = '${couponCode}';
+        WHERE code = '${code}';
       `;
                 await db.query(couponQuery);
             }

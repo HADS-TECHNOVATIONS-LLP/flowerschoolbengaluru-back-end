@@ -1018,11 +1018,9 @@ export async function registerRoutes(app) {
             res.status(500).json({ message: "Failed to fetch featured products" });
         }
     });
-    // Filter products by main_category, subcategory, name search
     app.get("/api/products", async (req, res) => {
         try {
             const { main_category, subcategory, name, search, inStock, featured, bestSeller, minPrice, maxPrice, colors, flowerTypes, arrangements } = req.query;
-            // Log the filter parameters for debugging
             console.log('Products API called with filters:', {
                 main_category,
                 subcategory,
@@ -1037,11 +1035,31 @@ export async function registerRoutes(app) {
                 flowerTypes,
                 arrangements
             });
+            // ✅ NEW CONDITION (PUT HERE)
+            if (main_category && flowerTypes && !subcategory && !arrangements) {
+                const flowerTypesArr = flowerTypes
+                    .split(',')
+                    .map(f => f.trim());
+                console.log("Using NEW PATH: main_category + flowerTypes only");
+                const products = await storage.getProductsByMainCategoryAndFilter(main_category, flowerTypesArr);
+                const normalizedProducts = normalizeProductsStockStatus(products);
+                res.json(normalizedProducts);
+                return;
+            }
+            // Prioritize main_category + subcategory + (flowerTypes or arrangements)
+            if (main_category && subcategory && (flowerTypes || arrangements)) {
+                const flowerTypesArr = flowerTypes ? flowerTypes.split(',').map(f => f.trim()) : [];
+                const arrangementsArr = arrangements ? arrangements.split(',').map(a => a.trim()) : [];
+                const products = await storage.getProductsByMainCategoryAndSubcategoryAndFilter(main_category, subcategory, flowerTypesArr, arrangementsArr, colors ? colors.split(',').map(c => c.trim()) : []);
+                const normalizedProducts = normalizeProductsStockStatus(products);
+                res.json(normalizedProducts);
+                return;
+            }
             // Check if we have any advanced filter parameters
             const hasAdvancedFilters = inStock !== undefined || featured !== undefined || bestSeller !== undefined ||
                 minPrice !== undefined || maxPrice !== undefined || colors !== undefined ||
                 flowerTypes !== undefined || arrangements !== undefined;
-            console.log('Advanced filters check:', { hasAdvancedFilters, inStock, featured, bestSeller, minPrice, maxPrice, colors, flowerTypes, arrangements });
+            console.log('Advanced filters check:', { hasAdvancedFilters });
             // If we have advanced filters, use the filtered query function
             if (hasAdvancedFilters) {
                 console.log('Using advanced filters path - getProductsWithFilters');
@@ -1065,7 +1083,6 @@ export async function registerRoutes(app) {
                 }
                 catch (filterError) {
                     console.error('Error using advanced filters, falling back to basic query:', filterError);
-                    // Fall through to basic query handling below
                 }
             }
             // If both main_category and subcategory are provided
@@ -3794,6 +3811,28 @@ export async function registerRoutes(app) {
             // Normalize and compute pricing fields on the server as single source of truth
             const raw = req.body || {};
             const updates = { ...raw };
+            // Normalize filter: always store as array of item values (e.g., ['roses','lilies'])
+            let filterNorm = null;
+            if (raw.filter !== undefined) {
+                if (Array.isArray(raw.filter)) {
+                    filterNorm = raw.filter.map((f) => typeof f === 'object' && f.item ? f.item.toLowerCase() : (typeof f === 'string' ? f.toLowerCase() : f)).filter(Boolean);
+                }
+                else if (typeof raw.filter === 'string') {
+                    try {
+                        const parsed = JSON.parse(raw.filter);
+                        if (Array.isArray(parsed)) {
+                            filterNorm = parsed.map((f) => typeof f === 'object' && f.item ? f.item.toLowerCase() : (typeof f === 'string' ? f.toLowerCase() : f)).filter(Boolean);
+                        }
+                        else {
+                            filterNorm = [raw.filter.toLowerCase()];
+                        }
+                    }
+                    catch {
+                        filterNorm = raw.filter.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+                    }
+                }
+                updates.filter = filterNorm ? JSON.stringify(filterNorm) : null;
+            }
             // Parse boolean helper function
             const parseBool = (v) => {
                 if (v === true || v === 1 || v === '1')
@@ -3869,6 +3908,10 @@ export async function registerRoutes(app) {
             }
             console.log(`Updating product ${id} with:`, Object.keys(updates));
             const product = await storage.updateProduct(id, updates);
+            // Ensure filter is included in response as array of item values
+            if (product && updates.filter !== undefined) {
+                product.filter = filterNorm || [];
+            }
             res.json({
                 success: true,
                 message: "Product updated successfully",
@@ -3932,6 +3975,28 @@ export async function registerRoutes(app) {
                     categoryNorm = trimmed;
                 }
             }
+            // Normalize filter: always store as array of item values (e.g., ['roses','lilies'])
+            let filterNorm = null;
+            if (Array.isArray(raw.filter)) {
+                // If array of objects with 'item', extract only item values
+                filterNorm = raw.filter.map((f) => typeof f === 'object' && f.item ? f.item.toLowerCase() : (typeof f === 'string' ? f.toLowerCase() : f)).filter(Boolean);
+            }
+            else if (typeof raw.filter === 'string') {
+                // If comma-separated string or JSON array string
+                try {
+                    const parsed = JSON.parse(raw.filter);
+                    if (Array.isArray(parsed)) {
+                        filterNorm = parsed.map((f) => typeof f === 'object' && f.item ? f.item.toLowerCase() : (typeof f === 'string' ? f.toLowerCase() : f)).filter(Boolean);
+                    }
+                    else {
+                        filterNorm = [raw.filter.toLowerCase()];
+                    }
+                }
+                catch {
+                    // fallback: comma-separated string
+                    filterNorm = raw.filter.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+                }
+            }
             // Accept multiple possible stock field names
             const stockRaw = raw.stockQuantity ?? raw.stockquantity ?? raw.stock_quantity ?? raw.stock ?? 0;
             const stockQuantity = stockRaw !== undefined ? Number(stockRaw) : 0;
@@ -3944,6 +4009,7 @@ export async function registerRoutes(app) {
                 discountPercentage: raw.discountPercentage !== undefined && raw.discountPercentage !== null ? Number(raw.discountPercentage) : undefined,
                 discountAmount: raw.discountAmount !== undefined && raw.discountAmount !== null ? Number(raw.discountAmount) : undefined,
                 category: categoryNorm,
+                filter: filterNorm,
                 stockQuantity: isNaN(stockQuantity) ? 0 : stockQuantity,
                 inStock: (raw.inStock !== undefined ? raw.inStock : raw.instock) !== undefined ? Boolean(raw.inStock ?? raw.instock) : true,
                 featured: raw.featured || false,
@@ -3992,6 +4058,10 @@ export async function registerRoutes(app) {
                 return res.status(400).json({ error: "Missing required fields: name, description, price and at least one of main_category/subcategory" });
             }
             const product = await storage.createProduct(productData);
+            // Ensure filter is included in response as array of item values
+            if (product && productData.filter !== undefined) {
+                product.filter = productData.filter;
+            }
             res.status(201).json(product);
         }
         catch (error) {

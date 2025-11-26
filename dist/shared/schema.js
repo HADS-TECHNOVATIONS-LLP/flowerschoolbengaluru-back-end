@@ -42,6 +42,7 @@ export const products = pgTable("products", {
     iscustom: boolean("iscustom").default(false),
     colour: text("colour"),
     discountsOffers: boolean("discounts_offers").default(false),
+    filter: text("filter"), // Add filter field for normalized filter array (as JSON string)
     createdAt: timestamp("created_at").defaultNow(),
 });
 export const courses = pgTable("courses", {
@@ -266,8 +267,13 @@ export const orderPlacementSchema = z.object({
     shippingAddressId: z.string().optional(), // For authenticated users
     deliveryAddress: z.string().optional(), // For guest users or custom address
     // Coupon information
-    couponCode: z.string().optional(),
-    discountAmount: z.number().min(0, "Discount amount cannot be negative").default(0),
+    code: z.string().optional(),
+    coupon_id: z.string().optional(),
+    coupon_type: z.string().optional(),
+    coupon_value: z.number().optional(),
+    coupon_description: z.string().optional(),
+    discount_amount: z.number().min(0, "Discount amount cannot be negative").default(0),
+    final_amount: z.number().optional(),
     // Final total
     total: z.number().positive("Total must be positive"),
     // User information (optional for guest checkout)
