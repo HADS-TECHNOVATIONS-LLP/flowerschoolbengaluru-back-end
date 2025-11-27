@@ -56,16 +56,13 @@ export class EmailService {
         </head>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 0; background-color: #f9fafb;">
           <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-            
             <!-- Header -->
             <div style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%); color: white; padding: 30px 20px; text-align: center;">
               <h1 style="margin: 0; font-size: 28px; font-weight: bold; color: #ec4899;">🌸 Bouquet Bar Bengaluru</h1>
               <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9; color: #10b981;">Order Confirmation</p>
             </div>
-
             <!-- Content -->
             <div style="padding: 30px 20px;">
-              
               <!-- Success Message -->
               <div style="background-color: #d1fae5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 16px; margin-bottom: 24px;">
                 <div style="display: flex; align-items: center;">
@@ -76,7 +73,6 @@ export class EmailService {
                   </div>
                 </div>
               </div>
-
               <!-- Order Details -->
               <div style="margin-bottom: 24px;">
                 <h2 style="color: #1f2937; margin: 0 0 16px 0; font-size: 20px;">📋 Order Details</h2>
@@ -87,9 +83,17 @@ export class EmailService {
                   ${orderData.customerPhone ? `<p style="margin: 0 0 8px 0;"><strong>Phone:</strong> ${orderData.customerPhone}</p>` : ''}
                   ${orderData.paymentMethod && orderData.paymentMethod !== 'Not specified' ? `<p style="margin: 0 0 8px 0;"><strong>Payment Method:</strong> ${orderData.paymentMethod}</p>` : ''}
                   <p style="margin: 0;"><strong>Estimated Delivery:</strong> ${this.formatDate(orderData.estimatedDeliveryDate)}</p>
+                  ${orderData['delivery_option'] ? `<p style=\"margin: 0 0 8px 0;\"><strong>Delivery Option:</strong> ${orderData['delivery_option']}</p>` : ''}
+                  ${orderData['distance'] ? `<p style=\"margin: 0 0 8px 0;\"><strong>Distance:</strong> ${orderData['distance']} km</p>` : ''}
                 </div>
               </div>
-
+              <!-- Delivery Information Note -->
+              <div style="margin-bottom: 24px;">
+                <h2 style="color: #1f2937; margin: 0 0 8px 0; font-size: 18px;">Delivery Information</h2>
+                <div style="background-color: #fef3c7; border-radius: 6px; padding: 12px; color: #92400e; font-size: 14px;">
+                  Note: Delivery charges will vary depending on the porter or third-party delivery services.
+                </div>
+              </div>
               <!-- Order Items -->
               <div style="margin-bottom: 24px;">
                 <h2 style="color: #1f2937; margin: 0 0 16px 0; font-size: 20px;">🛍️ Order Items</h2>
@@ -102,7 +106,6 @@ export class EmailService {
                   `}
                 </div>
               </div>
-
               <!-- Order Summary -->
               <div style="margin-bottom: 24px;">
                 <h2 style="color: #1f2937; margin: 0 0 16px 0; font-size: 20px;">💰 Order Summary</h2>
@@ -130,10 +133,8 @@ export class EmailService {
                   </div>
                   ` : ''}
                   <hr style="border: none; border-top: 1px solid #d1d5db; margin: 12px 0;">
-                  
                 </div>
               </div>
-
               <!-- Delivery Address -->
               ${orderData.deliveryAddress && orderData.deliveryAddress !== 'Address not provided' ? `
               <div style="margin-bottom: 24px;">
@@ -168,36 +169,42 @@ export class EmailService {
         </html>
       `;
             const emailText = `
-Order Confirmation - Bouquet Bar Bengaluru
+    Order Confirmation - Bouquet Bar Bengaluru
 
-Dear ${orderData.customerName},
+    Dear ${orderData.customerName},
 
-Thank you for your order! Your payment has been processed successfully.
+    Thank you for your order! Your payment has been processed successfully.
 
-Order Details:
-- Order Number: ${orderData.orderNumber}
-${orderData.paymentMethod && orderData.paymentMethod !== 'Not specified' ? `- Payment Method: ${orderData.paymentMethod}\n` : ''}
-- Estimated Delivery: ${this.formatDate(orderData.estimatedDeliveryDate)}
+    Order Details:
+    - Order Number: ${orderData.orderNumber}
+    ${orderData.paymentMethod && orderData.paymentMethod !== 'Not specified' ? `- Payment Method: ${orderData.paymentMethod}\n` : ''}
+    - Estimated Delivery: ${this.formatDate(orderData.estimatedDeliveryDate)}
+    ${orderData['delivery_option'] ? `- Delivery Option: ${orderData['delivery_option']}\n` : ''}
+    ${orderData['distance'] ? `- Distance: ${orderData['distance']} km\n` : ''}
 
-Order Items:
-${orderData.items.map(item => {
+    Delivery Information:
+    Note: Delivery charges will vary depending on the porter or third-party delivery services.
+
+    Order Items:
+    ${orderData.items.map(item => {
                 const productName = item.name || item.productName || 'Product';
                 const quantity = Number(item.quantity || 1);
                 return `- ${productName} (Quantity: ${quantity})`;
             }).join('\n')}
 
-Order Summary:
-- Subtotal: ${this.formatPrice(orderData.subtotal)}
-${orderData.deliveryCharge && Number(orderData.deliveryCharge) > 0 ? `- Delivery Charge: ${this.formatPrice(orderData.deliveryCharge)}\n` : ''}${orderData.paymentCharges && Number(orderData.paymentCharges) > 0 ? `- Payment Charges: ${this.formatPrice(orderData.paymentCharges)}\n` : ''}${orderData.discountAmount && Number(orderData.discountAmount) > 0 ? `- Discount: -${this.formatPrice(orderData.discountAmount)}\n` : ''}- Total: ${this.formatPrice(orderData.total)}
+    Order Summary:
+    - Subtotal: ${this.formatPrice(orderData.subtotal)}
+    ${orderData.deliveryCharge && Number(orderData.deliveryCharge) > 0 ? `- Delivery Charge: ${this.formatPrice(orderData.deliveryCharge)}\n` : ''}${orderData.paymentCharges && Number(orderData.paymentCharges) > 0 ? `- Payment Charges: ${this.formatPrice(orderData.paymentCharges)}\n` : ''}${orderData.discountAmount && Number(orderData.discountAmount) > 0 ? `- Discount: -${this.formatPrice(orderData.discountAmount)}\n` : ''}- Total: ${this.formatPrice(orderData.total)}
 
-${orderData.deliveryAddress && orderData.deliveryAddress !== 'Address not provided' ? `Delivery Address:\n${orderData.deliveryAddress}\n\n` : ''}
-We'll send you updates as your order is prepared and shipped.
+    ${orderData.deliveryAddress && orderData.deliveryAddress !== 'Address not provided' ? `Delivery Address:\n${orderData.deliveryAddress}\n\n` : ''}
+    We'll send you updates as your order is prepared and shipped.
 
-Thank you for choosing Bouquet Bar Bengaluru!
+    Thank you for choosing Bouquet Bar Bengaluru!
 
-For any questions, contact us at ${config.sendgrid.fromEmail}
+    For any questions, contact us at ${config.sendgrid.fromEmail}
       `;
-            const msg = {
+            // Send to user
+            const msgUser = {
                 to: orderData.customerEmail,
                 from: {
                     email: config.sendgrid.fromEmail,
@@ -207,8 +214,24 @@ For any questions, contact us at ${config.sendgrid.fromEmail}
                 text: emailText,
                 html: emailHtml,
             };
-            await sgMail.send(msg);
-            console.log('[EMAIL] Order confirmation email sent successfully to:', orderData.customerEmail);
+            await sgMail.send(msgUser);
+            // Send to all admin emails
+            if (Array.isArray(config.admin.emails) && config.admin.emails.length > 0) {
+                for (const adminEmail of config.admin.emails) {
+                    const msgAdmin = {
+                        to: adminEmail,
+                        from: {
+                            email: config.sendgrid.fromEmail,
+                            name: 'Bouquet Bar Bengaluru'
+                        },
+                        subject: `New Order Placed - ${orderData.orderNumber}`,
+                        text: emailText,
+                        html: emailHtml,
+                    };
+                    await sgMail.send(msgAdmin);
+                }
+            }
+            console.log('[EMAIL] Order confirmation email sent successfully to:', orderData.customerEmail, 'and admin(s)');
             return true;
         }
         catch (error) {

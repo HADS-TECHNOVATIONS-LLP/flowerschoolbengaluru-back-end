@@ -1,179 +1,98 @@
-# Flower School E-commerce Backend - AI Coding Guide
+# Flower School E-commerce Backend — AI Coding Agent Guide
 
 ## Architecture Overview
 
-This is a TypeScript Express.js backend for an e-commerce flower shop with integrated course enrollment. Key architectural decisions:
+This backend is a TypeScript Express.js monolith for a flower shop with course enrollment. Key architectural decisions:
 
-- **Dual Storage Pattern**: `storage.ts` (interface) → `database-storage.ts` (implementation) provides clean abstraction
-- **Service Layer**: Background scheduler, notifications, message queue, and email service in `/services`  
-- **Schema-First**: Drizzle ORM with Zod validation in `/shared/schema.ts`
-- **Template System**: SMS/WhatsApp templates in `/templates` for consistent messaging
-- **Full-Stack Dev**: Integrated Vite dev server (`vite-dev-server.ts`) serves frontend during development
+- **Storage Abstraction**: Use `storage.ts` (interface) and `database-storage.ts` (PostgreSQL implementation) for all data access. Never call the database directly—always use the storage layer.
+- **Service Layer**: All background jobs, notifications, message queue, and email logic live in `/services`. E.g., `background-scheduler.ts` auto-progresses orders every 30 minutes.
+- **Schema-First**: Database tables and Zod validation are defined in `/shared/schema.ts` using Drizzle ORM. No migration system—edit `schema.ts` directly for schema changes.
+- **Notification Templates**: SMS/WhatsApp templates are in `/templates` for consistent messaging.
+- **Integrated Dev Server**: `vite-dev-server.ts` serves the frontend during development.
 
 ## Essential File Structure
 
 ```
-├── index.ts              # Express app setup, middleware, logging
-├── routes.ts              # All API endpoints (6500+ lines)
-├── config.ts              # Environment config with hardcoded fallbacks
-├── storage.ts             # Storage interface definition  
-├── database-storage.ts    # PostgreSQL implementation
-├── db.ts                  # Raw PostgreSQL connection pool
-├── services/
-│   ├── background-scheduler.ts  # Auto order progression (30min intervals)
-│   ├── notification-service.ts  # Twilio SMS/WhatsApp integration
-│   ├── message-queue.ts         # Retry logic for failed messages
-│   └── email-service.ts         # SendGrid order confirmations
-├── templates/
-│   ├── sms-templates.ts         # SMS notification templates
-│   └── whatsapp-templates.ts    # WhatsApp notification templates
-└── shared/schema.ts       # Drizzle tables + Zod schemas
+index.ts                # Express app, middleware, logging
+routes.ts               # All API endpoints (very large, ~6500+ lines)
+config.ts               # Env config, hardcoded fallbacks
+storage.ts              # Storage interface
+database-storage.ts     # PostgreSQL implementation
+db.ts                   # Raw PostgreSQL pool
+services/               # Background jobs, notifications, email, queue
+templates/              # SMS/WhatsApp templates
+shared/schema.ts        # Drizzle tables + Zod schemas
 ```
 
-## Development Workflows
+## Developer Workflows
 
-**Local Development**:
-```bash
-npm run dev              # tsx watch mode
-npm run backend         # alias for dev
-```
+- **Local Dev**: `npm run dev` (tsx watch mode), `npm run backend` (alias)
+- **Production**: `npm run logs` (PM2 logs)
+- **Docker**: `docker-compose up -d` (Postgres + backend), `docker-compose logs -f`
+- **Schema Changes**: Edit `shared/schema.ts` directly, then restart backend
 
-**Production Deployment**:
-```bash
-npm run build           # TypeScript compilation
-npm run deploy          # Build + PM2 start
-npm run restart         # PM2 restart existing process
-npm run stop            # PM2 stop process
-npm run status          # PM2 process status
-npm run logs            # View PM2 logs
-```
+## Project-Specific Patterns & Conventions
 
-**Docker Development**:
-```bash
-docker-compose up -d    # Start PostgreSQL + backend
-docker-compose logs -f  # Follow container logs
-```
+- **Session Management**: In-memory sessions in `routes.ts` (no Redis/external store). Manual cleanup of expired sessions.
+- **Order Status**: Orders auto-progress via background scheduler (`services/background-scheduler.ts`).
+- **Notifications**: Use try/catch for all notification logic. Templates in `/templates`.
+- **Category System**: Hardcoded master category data in `routes.ts` (see line ~15).
+- **File Uploads**: Uses both `express-fileupload` and `multer` (50MB limit in `index.ts`). No cloud storage—local only.
+- **API Structure**: All endpoints in `routes.ts`. Do not split unless refactoring entire feature.
 
-**Database**: Uses PostgreSQL via connection pool (`db.ts`). No migration system - modify `schema.ts` directly.
+## Integration Points
 
-## Key Patterns & Conventions
+- **SendGrid**: Email confirmations via `services/email-service.ts` (config in `config.ts`).
+- **Twilio**: SMS/WhatsApp via `services/notification-service.ts` (templates in `/templates`).
+- **Razorpay**: Payment processing in `routes.ts` (config in `config.ts`).
 
-### 1. Session Management (In-Memory)
+## Database Usage
+
+- **Drizzle ORM**: Tables and Zod schemas in `shared/schema.ts`.
+- **Connection**: Raw pool in `db.ts`.
+- **Access**: Always use `storage.ts` methods (e.g., `storage.getUser(id)`, `storage.getUserOrders(userId)`).
+
+## Debugging & Testing
+
+- **No test framework**: Add Jest/Vitest if needed.
+- **Logging**: Request timing middleware in `index.ts`.
+- **PM2**: Production process manager (`ecosystem.config.json`).
+- **Docker**: Multi-stage build, Postgres service.
+
+## Anti-Patterns to Avoid
+
+1. **Never bypass storage layer**: Use `storage.*`, not `db.query()`.
+2. **Don't hardcode secrets**: Use env vars (see `config.ts`).
+3. **Don't split routes.ts**: Only refactor by feature, not piecemeal.
+4. **Don't ignore background scheduler**: Orders auto-progress—account for this in status logic.
+
+## Key APIs
+
+- **Auth**: `/api/auth/*` (signup, signin, OTP, password reset)
+- **Products**: `/api/products/*` (search, categories, stock)
+- **Orders**: Placement, status, cancellation
+- **Profile**: User management, address
+- **Courses**: Event enrollment
+
+## Example Patterns
+
+**Session Management**
 ```typescript
-// routes.ts line ~295
 const sessions: Map<string, { userId: string; expires: number }> = new Map();
 ```
-- Token-based auth via cookies
-- No Redis/external session store
-- Manual cleanup of expired sessions
 
-### 2. Order Status Progression (Background Jobs)
+**Storage Usage**
 ```typescript
-// services/background-scheduler.ts
-const statusProgressions: OrderStatusProgression[] = [
-  { currentStatus: "pending", nextStatus: "confirmed", progressionTime: 60 },
-  // Auto-advances every 30 minutes
-];
+const user = await storage.getUser(id);
+const orders = await storage.getUserOrders(userId);
 ```
 
-### 3. Notification Pattern
+**Category System**
 ```typescript
-// All order updates trigger SMS + WhatsApp via templates
-const result = await notificationService.sendOrderConfirmation(order);
-```
-
-### 4. Message Queue (Retry Logic)
-```typescript
-// services/message-queue.ts - Auto-retries failed messages
-const retryDelays = [30000, 60000, 300000]; // 30s, 1m, 5m
-queue.enqueue(phone, message, 'whatsapp');
-```
-
-### 5. Error Handling Convention
-```typescript
-// Consistent across routes.ts
-try {
-  // operation
-} catch (error) {
-  console.error("Context:", error);
-  res.status(500).json({ error: "Descriptive message" });
-}
-```
-
-### 6. Category System (Hardcoded)
-```typescript
-// routes.ts line ~15: Master category data for filtering
 const allCategories = [
   { id: "occasion", groups: [{ title: "Celebration Flowers", items: [...] }] }
 ];
 ```
 
-## Integration Points
-
-### Twilio (SMS/WhatsApp)
-- Config: `config.ts` twilio section
-- Service: `services/notification-service.ts`  
-- Templates: `/templates/*.ts` files
-- Used for: OTP, order confirmations, status updates
-
-### SendGrid (Email)
-- Config: `config.sendgrid` in `config.ts`
-- Service: `services/email-service.ts`
-- Used for: Order confirmations, receipts
-- Templates: HTML email templates with order details
-
-### Razorpay Payments
-- Config: `config.razorpay` with live keys
-- Integration: Payment processing in routes.ts
-- No webhook handling implemented
-
-### File Uploads
-- Uses both `express-fileupload` and `multer`
-- 50MB limit configured in `index.ts`
-- No cloud storage - likely local/filesystem
-
-## Database Specifics
-
-### Schema Pattern
-```typescript
-// shared/schema.ts - Drizzle + Zod integration
-export const users = pgTable("users", { ... });
-export const insertUserSchema = createInsertSchema(users);
-```
-
-### Connection
-```typescript
-// db.ts - Raw PostgreSQL pool
-export const db = new Pool({ connectionString: config.database.url });
-```
-
-### Storage Interface
-```typescript
-// Always use storage.ts methods, not direct database calls
-const user = await storage.getUser(id);
-const orders = await storage.getUserOrders(userId);
-```
-
-## Testing & Debugging
-
-- **No test framework configured** - add Jest/Vitest if needed
-- **Logging**: Request timing middleware in `index.ts`
-- **PM2**: Production process management with `ecosystem.config.json`
-- **Docker**: Multi-stage build with PostgreSQL service
-
-## Common Anti-Patterns to Avoid
-
-1. **Don't bypass storage layer**: Use `storage.*` methods, not direct `db.query()`
-2. **Don't hardcode secrets**: Already has fallbacks in `config.ts` but use env vars in production  
-3. **Don't modify routes.ts structure**: 6500+ lines - consider splitting by feature
-4. **Don't ignore background scheduler**: Orders auto-progress - account for this in status logic
-
-## Key APIs by Domain
-
-**Auth**: `/api/auth/*` - signup, signin, OTP verification, password reset
-**Products**: `/api/products/*` - search, categories, stock status
-**Orders**: Order placement, status tracking, cancellation
-**Profile**: User management, address updates
-**Courses**: Event enrollment system
-
-When adding features, follow the established patterns: storage interface → database implementation → route handler → error handling → optional notifications.
+---
+If any section is unclear or missing, please provide feedback to iterate and improve these instructions.
