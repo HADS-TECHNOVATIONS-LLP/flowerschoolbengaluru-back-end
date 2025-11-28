@@ -1114,9 +1114,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/products/featured", async (req, res) => {
     try {
   const products = await storage.getFeaturedProducts();
-  // ensure category present
+
   const productsWithCategory = products.map(p => ({ ...p, category: (p as any).main_category ?? (p as any).category ?? (p as any).subcategory }));
-  // Normalize stock status for featured products
+ 
   const normalizedProducts = normalizeProductsStockStatus(productsWithCategory);
       
   res.json(normalizedProducts);
@@ -1157,46 +1157,41 @@ app.get("/api/products", async (req, res) => {
       arrangements
     });
 
-    // ✅ NEW CONDITION (PUT HERE)
-if (main_category && flowerTypes && !subcategory && !arrangements) {
+    // ✅ NEW CONDITION for main_category + flowerTypes only
+    if (main_category && flowerTypes && !subcategory && !arrangements) {
+      const flowerTypesArr = (flowerTypes as string)
+        .split(',')
+        .map(f => f.trim());
 
-  const flowerTypesArr = (flowerTypes as string)
-    .split(',')
-    .map(f => f.trim());
+      console.log("Using NEW PATH: main_category + flowerTypes only");
 
-  console.log("Using NEW PATH: main_category + flowerTypes only");
-
-  const products = await storage.getProductsByMainCategoryAndFilter(
-    main_category as string,
-    flowerTypesArr
-  );
-
-  const normalizedProducts = normalizeProductsStockStatus(products);
-  res.json(normalizedProducts);
-  return;
-}
-
-    
-    // Prioritize main_category + subcategory + (flowerTypes or arrangements)
-    if (main_category && subcategory && (flowerTypes || arrangements)) { 
-      const flowerTypesArr = flowerTypes ? (flowerTypes as string).split(',').map(f => f.trim()) : [];
-      const arrangementsArr = arrangements ? (arrangements as string).split(',').map(a => a.trim()) : [];
-      
-    const products = await storage.getProductsByMainCategoryAndSubcategoryAndFilter(
-  main_category as string,
-  subcategory as string,
-  flowerTypesArr,
-  arrangementsArr,
-  colors ? (colors as string).split(',').map(c => c.trim()) : []
-);
+      const products = await storage.getProductsByMainCategoryAndFilter(
+        main_category as string,
+        flowerTypesArr
+      );
 
       const normalizedProducts = normalizeProductsStockStatus(products);
       res.json(normalizedProducts);
       return;
     }
 
+    // Prioritize main_category + subcategory + (flowerTypes or arrangements)
+    if (main_category && subcategory && (flowerTypes || arrangements)) { 
+      const flowerTypesArr = flowerTypes ? (flowerTypes as string).split(',').map(f => f.trim()) : [];
+      const arrangementsArr = arrangements ? (arrangements as string).split(',').map(a => a.trim()) : [];
+      
+      const products = await storage.getProductsByMainCategoryAndSubcategoryAndFilter(
+        main_category as string,
+        subcategory as string,
+        flowerTypesArr,
+        arrangementsArr,
+        colors ? (colors as string).split(',').map(c => c.trim()) : []
+      );
 
-
+      const normalizedProducts = normalizeProductsStockStatus(products);
+      res.json(normalizedProducts);
+      return;
+    }
 
     // Check if we have any advanced filter parameters
     const hasAdvancedFilters = inStock !== undefined || featured !== undefined || bestSeller !== undefined || 
@@ -1210,6 +1205,8 @@ if (main_category && flowerTypes && !subcategory && !arrangements) {
       console.log('Using advanced filters path - getProductsWithFilters');
       const filterParams = {
         name: (name || search) as string,
+        main_category: main_category as string,  // ✅ ADDED
+        subcategory: subcategory as string,      // ✅ ADDED
         inStock: inStock !== undefined ? inStock === 'true' : undefined,
         featured: featured !== undefined ? featured === 'true' : undefined,
         bestSeller: bestSeller !== undefined ? bestSeller === 'true' : undefined,

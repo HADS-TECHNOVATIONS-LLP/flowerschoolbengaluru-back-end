@@ -1008,9 +1008,7 @@ export async function registerRoutes(app) {
     app.get("/api/products/featured", async (req, res) => {
         try {
             const products = await storage.getFeaturedProducts();
-            // ensure category present
             const productsWithCategory = products.map(p => ({ ...p, category: p.main_category ?? p.category ?? p.subcategory }));
-            // Normalize stock status for featured products
             const normalizedProducts = normalizeProductsStockStatus(productsWithCategory);
             res.json(normalizedProducts);
         }
@@ -1035,7 +1033,7 @@ export async function registerRoutes(app) {
                 flowerTypes,
                 arrangements
             });
-            // ✅ NEW CONDITION (PUT HERE)
+            // ✅ NEW CONDITION for main_category + flowerTypes only
             if (main_category && flowerTypes && !subcategory && !arrangements) {
                 const flowerTypesArr = flowerTypes
                     .split(',')
@@ -1065,6 +1063,8 @@ export async function registerRoutes(app) {
                 console.log('Using advanced filters path - getProductsWithFilters');
                 const filterParams = {
                     name: (name || search),
+                    main_category: main_category, // ✅ ADDED
+                    subcategory: subcategory, // ✅ ADDED
                     inStock: inStock !== undefined ? inStock === 'true' : undefined,
                     featured: featured !== undefined ? featured === 'true' : undefined,
                     bestSeller: bestSeller !== undefined ? bestSeller === 'true' : undefined,
