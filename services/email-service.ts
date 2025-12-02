@@ -1,3 +1,4 @@
+import { getOrderStatusEmailTemplate } from '../templates/order-status-email-template.js';
 import sgMail from '@sendgrid/mail';
 import { config } from '../config.js';
 
@@ -325,6 +326,56 @@ export class EmailService {
       return false;
     }
   }
+  async sendOrderStatusUpdateEmail(order: any): Promise<boolean> {
+    try {
+      const { subject, html, text } = getOrderStatusEmailTemplate({
+        orderNumber: order.ordernumber || order.orderNumber,
+        customerName: order.customername || order.customerName,
+        status: order.status,
+        estimatedDeliveryDate: order.estimateddeliverydate || order.estimatedDeliveryDate,
+        deliveryAddress: order.deliveryaddress || order.deliveryAddress,
+        items: Array.isArray(order.items) ? order.items.map((item: any) => ({
+          productName: item.productName || item.name,
+          quantity: item.quantity
+        })) : [],
+        total: order.total
+      });
+      const msgUser = {
+        to: order.email,
+        from: {
+          email: config.sendgrid.fromEmail,
+          name: 'Bouquet Bar Bengaluru'
+        },
+        subject,
+        text,
+        html,
+      };
+      await sgMail.send(msgUser);
+      // Optionally notify admins
+      if (Array.isArray(config.admin.emails) && config.admin.emails.length > 0) {
+        for (const adminEmail of config.admin.emails) {
+          const msgAdmin = {
+            to: adminEmail,
+            from: {
+              email: config.sendgrid.fromEmail,
+              name: 'Bouquet Bar Bengaluru'
+            },
+            subject: `[ADMIN] ${subject}`,
+            text,
+            html,
+          };
+          await sgMail.send(msgAdmin);
+        }
+      }
+      console.log('[EMAIL] Order status update email sent to:', order.email);
+      return true;
+    } catch (error) {
+      console.error('[EMAIL] Error sending order status update email:', error);
+      return false;
+    }
+  }
+
+ 
 }
 
 export const emailService = new EmailService();

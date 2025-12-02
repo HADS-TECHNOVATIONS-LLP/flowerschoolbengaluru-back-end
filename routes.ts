@@ -4559,6 +4559,15 @@ app.get("/api/categoryuserdata", async (req, res) => {
 
       const order = await storage.updateOrderStatus(id, status);
 
+
+      
+      // Send status update email to user
+      try {
+        await emailService.sendOrderStatusUpdateEmail(order);
+      } catch (emailError) {
+        console.error('Failed to send order status update email:', emailError);
+      }
+
       res.json({
         success: true,
         message: "Order status updated successfully",
