@@ -624,7 +624,6 @@ return result.rows[0];
         SELECT 
           id,
           name,
-          email,
           phone,
           role,
           specialization,
@@ -716,7 +715,6 @@ return result.rows[0];
         SELECT 
           id,
           name,
-          email,
           phone,
           role,
           specialization,
@@ -745,7 +743,6 @@ return result.rows[0];
   try {
     const {
       name,
-      email,
       phone,
       role,
       specialization,
@@ -759,15 +756,14 @@ return result.rows[0];
 
     const query = `
         INSERT INTO bouquetbar.instructors (
-          name, email, phone, role, specialization, experience_years, 
+          name, phone, role, specialization, experience_years, 
           bio, profile_image, hourly_rate, availability, is_active
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
       `;
 
     const values = [
       name,
-      email,
       phone || null,
       role || null,
       specialization || null,
@@ -786,9 +782,6 @@ return result.rows[0];
     return result.rows[0];
   } catch(error) {
     console.error('Error creating instructor:', error);
-    if (error instanceof Error && error.message.includes('duplicate key')) {
-      throw new Error('Email already exists');
-    }
     throw new Error(`Failed to create instructor: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
@@ -796,7 +789,7 @@ return result.rows[0];
   async updateInstructor(id: string, updates: any): Promise < any > {
   try {
     const allowedFields = [
-      'name', 'email', 'phone', 'role', 'specialization', 'experience_years',
+      'name', 'phone', 'role', 'specialization', 'experience_years',
       'bio', 'profile_image', 'hourly_rate', 'availability', 'is_active'
     ];
 
@@ -845,9 +838,6 @@ console.log('Query Result:', result.rows[0]);
 return result.rows[0];
     } catch (error) {
   console.error('Error updating instructor:', error);
-  if (error instanceof Error && error.message.includes('duplicate key')) {
-    throw new Error('Email already exists');
-  }
   throw new Error(`Failed to update instructor: ${error instanceof Error ? error.message : 'Unknown error'}`);
 }
   }
@@ -876,7 +866,7 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
   try {
     const query = `
         SELECT 
-          id, name, email, phone, specialization, experience_years,
+          id, name, phone, specialization, experience_years,
           bio, profile_image, hourly_rate, availability, is_active
         FROM bouquetbar.instructors
         WHERE specialization ILIKE $1 AND is_active = true
@@ -896,7 +886,7 @@ console.log('Instructor deleted successfully:', result.rows[0].name);
   try {
     const query = `
         SELECT 
-          id, name, email, phone, specialization, experience_years,
+          id, name, phone, specialization, experience_years,
           bio, profile_image, hourly_rate, availability
         FROM bouquetbar.instructors
         WHERE is_active = true

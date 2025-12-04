@@ -5206,28 +5206,18 @@ app.get("/api/categoryuserdata", async (req, res) => {
 
       // Admin authorization
       const isAdmin = config.admin.emails.includes(user.email) || user.userType === "admin";
-      const { name, email, phone, role, specialization, experience_years, bio, profile_image, hourly_rate, availability, is_active } = req.body;
+      const { name, phone, role, specialization, experience_years, bio, profile_image, hourly_rate, availability, is_active } = req.body;
 
       // Validate required fields
-      if (!name || !email) {
+      if (!name) {
         return res.status(400).json({
           success: false,
-          error: "Name and email are required"
-        });
-      }
-
-      // Validate email format - only allow .com addresses
-      const emailRegex = /^[^\s@]+@[^\s@]+\.com$/i;
-      if (!emailRegex.test(email)) {
-        return res.status(400).json({
-          success: false,
-          error: "Invalid email format - only .com addresses are allowed"
+          error: "Name is required"
         });
       }
 
       const instructorData = {
         name: name.trim(),
-        email: email.trim().toLowerCase(),
         phone: phone?.trim() || null,
         role: role?.trim() || null,
         specialization: specialization?.trim() || null,
@@ -5249,14 +5239,7 @@ app.get("/api/categoryuserdata", async (req, res) => {
     } catch (error) {
       console.error("Error creating instructor:", error);
 
-      if (error instanceof Error) {
-        if (error.message.includes('Email already exists')) {
-          return res.status(409).json({
-            success: false,
-            error: "Email already exists"
-          });
-        }
-      }
+
 
       res.status(500).json({
         success: false,
