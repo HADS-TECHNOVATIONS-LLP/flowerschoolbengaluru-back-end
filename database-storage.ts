@@ -2020,16 +2020,32 @@ return {
 
 
   // Order Methods
-  async getAllOrders(): Promise < Order[] > {
-  const query = `
+async getAllOrders(date?: string): Promise<Order[]> {
+
+  let query = `
     SELECT *
-    FROM bouquetbar.orders;
+    FROM bouquetbar.orders
   `;
 
-  console.log('Executing query:', query);
+  if (date) {
+    query += `
+      WHERE createdat >= '${date} 00:00:00'
+      AND createdat <= '${date} 23:59:59'
+    `;
+  }
+
+  query += `
+    ORDER BY createdat DESC;
+  `;
+
+  console.log("Executing Query:", query);
+
   const result = await db.query(query);
   return result.rows;
 }
+
+
+
 
 
   async getOrder(id: string): Promise < Order | undefined > {

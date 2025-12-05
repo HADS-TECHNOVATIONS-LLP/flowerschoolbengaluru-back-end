@@ -4540,15 +4540,18 @@ app.get("/api/categoryuserdata", async (req, res) => {
 
   // Duplicate create handler removed — images and other fields are handled by the unified POST /api/admin/products above.
 
-  app.get("/api/admin/orders", async (req, res) => {
-    try {
-      const orders = await storage.getAllOrders();
-      res.json(orders);
-    } catch (error) {
-      console.error("Error getting orders:", error);
-      res.status(500).json({ error: "Failed to get orders" });
-    }
-  });
+app.get("/api/admin/orders", async (req, res) => {
+  try {
+    const { date } = req.query;
+    const orders = await storage.getAllOrders(date as string);
+    res.json(orders);
+  } catch (error) {
+    console.error("Error getting orders:", error);
+    res.status(500).json({ error: "Failed to get orders" });
+  }
+});
+
+
 
   app.put("/api/admin/orders/:id/status", async (req, res) => {
     try {
